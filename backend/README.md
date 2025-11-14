@@ -61,5 +61,14 @@ Edit `.env` file:
 - Supports multiple search terms
 - ML model updates with each search
 
+## Deploying to Render (FastAPI Web Service)
+
+- Create a **Web Service** and point it at this repo.
+- Set the **Root Directory** to `backend`.
+- Use `pip install -r requirements.txt` as the Build Command.
+- Use `uvicorn main:app --host 0.0.0.0 --port $PORT` as the Start Command.
+- Add environment variables for `RECCD_DB_URL`, `OPENAI_API_KEY`, `SPOTIFY_CLIENT_ID`, and `SPOTIFY_CLIENT_SECRET`.
+- Add an environment variable `PYTHON_VERSION=3.11.6` so Render installs compatible wheels (avoids compiling `pydantic-core`).
+
 
 
