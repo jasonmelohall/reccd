@@ -7,12 +7,10 @@ import logging
 from sqlalchemy import text
 from database import get_db_connection
 from config import get_settings
-import sys
-import os
-
-# Add parent directory to path to import reccd_items
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from reccd_items import get_parent_asin_from_rainforest, consolidate_parent_items
+from shared.reccd_items import (
+    get_parent_asin_from_rainforest,
+    consolidate_parent_items,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
