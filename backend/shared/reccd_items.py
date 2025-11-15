@@ -19,7 +19,11 @@ logger = logging.getLogger(__name__)
 def get_search_term() -> List[str]:
     """Return the default Amazon search terms."""
     list_amazon_search_terms = [
-       
+       'white bathroom trash can with lid modern',
+       'matte white step trash can small with lid',
+       'champagne gold small bathroom trash can with lid',
+       'brushed gold small trash can with lid bathroom',
+       'cream bathroom trash can with lid minimal',
     ]
     return list_amazon_search_terms
 

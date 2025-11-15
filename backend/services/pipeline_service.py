@@ -36,6 +36,9 @@ class PipelineService:
             "8_regression_items.py",
             "9_reccd_items.py"
         ]
+        self.script_timeouts = {
+            "2_items_get_listed_date_keepa.py": 1200,  # Keepa calls can take longer
+        }
     
     def run_full_pipeline(self, search_term: str):
         """
@@ -61,12 +64,13 @@ class PipelineService:
                 logger.info(f"Running {script}...")
                 
                 try:
+                    timeout = self.script_timeouts.get(script, 600)
                     result = subprocess.run(
                         ["python", script_path],
                         cwd=PIPELINE_DIR,
                         capture_output=True,
                         text=True,
-                        timeout=600  # 10 minute timeout per script
+                        timeout=timeout
                     )
                     
                     if result.returncode == 0:
@@ -127,35 +131,37 @@ class PipelineService:
         """Update search terms in reccd_items.py"""
         if not os.path.exists(RECCD_ITEMS_PATH):
             raise FileNotFoundError(f"reccd_items.py not found at {RECCD_ITEMS_PATH}")
-        
+
         try:
-            with open(RECCD_ITEMS_PATH, 'r', encoding="utf-8") as file_handle:
+            with open(RECCD_ITEMS_PATH, "r", encoding="utf-8") as file_handle:
                 content = file_handle.read()
-            
-            # Find and replace the list_amazon_search_terms
+
             import re
+
             pattern = r"list_amazon_search_terms = \[([^\]]*)\]"
-            
-            # Format the new search terms as a Python list string
+
             if isinstance(search_terms, str):
                 search_terms = [search_terms]
-            
-            terms_str = ",\n        ".join([f"'{term}'" for term in search_terms])
-            replacement = f"list_amazon_search_terms = [\n        {terms_str},\n    ]"
-            
+
+            if not search_terms:
+                replacement = "list_amazon_search_terms = []"
+            else:
+                terms_str = ",\n        ".join([f"'{term}'" for term in search_terms])
+                replacement = f"list_amazon_search_terms = [\n        {terms_str},\n    ]"
+
             new_content = re.sub(pattern, replacement, content)
-            
-            with open(RECCD_ITEMS_PATH, 'w', encoding="utf-8") as file_handle:
+
+            with open(RECCD_ITEMS_PATH, "w", encoding="utf-8") as file_handle:
                 file_handle.write(new_content)
-            
-            logger.info(f"Updated search terms in reccd_items.py to: {search_terms}")
-            
-        except Exception as e:
-            logger.error(f"Failed to update search terms: {e}")
+
+            logger.info("Updated search terms in reccd_items.py to: %s", search_terms)
+
+        except Exception as exc:
+            logger.error("Failed to update search terms: %s", exc)
             raise
 
+    # Global instance
 
-# Global instance
 pipeline_service = PipelineService()
 
 
