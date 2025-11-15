@@ -19,11 +19,12 @@ import sys
 
 logger = logging.getLogger(__name__)
 
-# Get the items directory (go up from services/ to api/ to items/)
-# __file__ = items/api/services/pipeline_service.py
-# We need to go up 3 levels: services -> api -> items -> and we want items/
-ITEMS_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-logger.info(f"ITEMS_DIR set to: {ITEMS_DIR}")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PIPELINE_DIR = os.path.join(BASE_DIR, "pipeline_scripts")
+SHARED_DIR = os.path.join(BASE_DIR, "shared")
+RECCD_ITEMS_PATH = os.path.join(SHARED_DIR, "reccd_items.py")
+
+logger.info("Pipeline base directory: %s", PIPELINE_DIR)
 
 
 class PipelineService:
@@ -56,13 +57,13 @@ class PipelineService:
         
         try:
             for script in self.scripts:
-                script_path = os.path.join(ITEMS_DIR, script)
+                script_path = os.path.join(PIPELINE_DIR, script)
                 logger.info(f"Running {script}...")
                 
                 try:
                     result = subprocess.run(
                         ["python", script_path],
-                        cwd=ITEMS_DIR,
+                        cwd=PIPELINE_DIR,
                         capture_output=True,
                         text=True,
                         timeout=600  # 10 minute timeout per script
@@ -104,32 +105,32 @@ class PipelineService:
             self._update_search_terms(original_search_terms)
     
     def _get_current_search_terms(self):
-        """Read current search terms from reccd_items.py"""
-        # reccd_items.py is in the items directory
-        reccd_items_path = os.path.join(ITEMS_DIR, "reccd_items.py")
+        """Read current search terms from shared reccd_items.py"""
+        if not os.path.exists(RECCD_ITEMS_PATH):
+            logger.warning("reccd_items file not found at %s", RECCD_ITEMS_PATH)
+            return []
         
-        # Import the module to get current search terms
-        sys.path.insert(0, ITEMS_DIR)
+        sys.path.insert(0, SHARED_DIR)
         try:
-            import reccd_items
-            # Force reload to get fresh values
             import importlib
+            import reccd_items
             importlib.reload(reccd_items)
             return reccd_items.get_search_term()
-        except Exception as e:
-            logger.warning(f"Could not read current search terms: {e}")
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.warning("Could not read current search terms: %s", exc)
             return []
         finally:
-            sys.path.remove(ITEMS_DIR)
+            if SHARED_DIR in sys.path:
+                sys.path.remove(SHARED_DIR)
     
     def _update_search_terms(self, search_terms):
         """Update search terms in reccd_items.py"""
-        # reccd_items.py is in the items directory
-        reccd_items_path = os.path.join(ITEMS_DIR, "reccd_items.py")
+        if not os.path.exists(RECCD_ITEMS_PATH):
+            raise FileNotFoundError(f"reccd_items.py not found at {RECCD_ITEMS_PATH}")
         
         try:
-            with open(reccd_items_path, 'r') as f:
-                content = f.read()
+            with open(RECCD_ITEMS_PATH, 'r', encoding="utf-8") as file_handle:
+                content = file_handle.read()
             
             # Find and replace the list_amazon_search_terms
             import re
@@ -144,8 +145,8 @@ class PipelineService:
             
             new_content = re.sub(pattern, replacement, content)
             
-            with open(reccd_items_path, 'w') as f:
-                f.write(new_content)
+            with open(RECCD_ITEMS_PATH, 'w', encoding="utf-8") as file_handle:
+                file_handle.write(new_content)
             
             logger.info(f"Updated search terms in reccd_items.py to: {search_terms}")
             
