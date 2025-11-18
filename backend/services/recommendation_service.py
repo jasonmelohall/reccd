@@ -144,7 +144,12 @@ class RecommendationService:
             })
         
         if len(df) == 0:
-            logger.info(f"No items found for search term: {search_term}")
+            # Debug: Check what search terms actually exist in the database
+            debug_query = text("SELECT DISTINCT search_term FROM items WHERE search_term LIKE :pattern LIMIT 10")
+            existing_terms = conn.execute(debug_query, {"pattern": search_pattern}).fetchall()
+            logger.info(f"No items found for search term: {search_term} (pattern: {search_pattern})")
+            if existing_terms:
+                logger.info(f"Found similar search terms in DB: {[t[0] for t in existing_terms]}")
             return [], coefficients, constant
         
         # Convert date columns

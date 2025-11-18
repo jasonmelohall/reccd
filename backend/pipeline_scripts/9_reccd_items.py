@@ -331,17 +331,29 @@ try:
     print()
 
     # === Save Purchased ASINs (unchanged from your version) ===
-    def timeout_handler(signum, frame):
-        raise TimeoutError
-
-    signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(300)
-
+    # Skip interactive input when running in non-interactive environment (e.g., Render subprocess)
+    purchased_asins = ""
     try:
-        purchased_asins = input("\nEnter comma-separated ASINs you purchased (or press Enter to skip): ").strip()
-        signal.alarm(0)
-    except TimeoutError:
-        print("\n⏰ No input received. Skipping.")
+        import sys
+        if sys.stdin.isatty():
+            # Only prompt if we have an interactive terminal
+            def timeout_handler(signum, frame):
+                raise TimeoutError
+
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(300)
+
+            try:
+                purchased_asins = input("\nEnter comma-separated ASINs you purchased (or press Enter to skip): ").strip()
+                signal.alarm(0)
+            except TimeoutError:
+                print("\n⏰ No input received. Skipping.")
+                purchased_asins = ""
+        else:
+            print("\n⏰ Running in non-interactive mode. Skipping purchase input.")
+    except (EOFError, OSError):
+        # EOFError when stdin is closed (subprocess), OSError if signal.SIGALRM not available
+        print("\n⏰ No interactive input available. Skipping purchase recording.")
         purchased_asins = ""
 
     if purchased_asins:
