@@ -1,15 +1,15 @@
+import os
+import sys
 import pandas as pd
 from sqlalchemy import text
 import datetime
 import signal
 import numpy as np
-import os
-import sys
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-SHARED_DIR = os.path.join(os.path.dirname(CURRENT_DIR), "shared")
-if SHARED_DIR not in sys.path:
-    sys.path.insert(0, SHARED_DIR)
+# Add shared directory to path for imports
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SHARED_DIR = os.path.join(BASE_DIR, "shared")
+sys.path.insert(0, SHARED_DIR)
 
 import reccd_items
 
@@ -334,7 +334,6 @@ try:
     # Skip interactive input when running in non-interactive environment (e.g., Render subprocess)
     purchased_asins = ""
     try:
-        import sys
         if sys.stdin.isatty():
             # Only prompt if we have an interactive terminal
             def timeout_handler(signum, frame):

@@ -2,16 +2,16 @@
 # -*- coding: utf-8 -*-
 
 import os
+import sys
 import requests
 from sqlalchemy import text
 import datetime
 import logging
-import sys
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-SHARED_DIR = os.path.join(os.path.dirname(CURRENT_DIR), "shared")
-if SHARED_DIR not in sys.path:
-    sys.path.insert(0, SHARED_DIR)
+# Add shared directory to path for imports
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SHARED_DIR = os.path.join(BASE_DIR, "shared")
+sys.path.insert(0, SHARED_DIR)
 
 import reccd_items
 from reccd_items import get_parent_asin_from_rainforest, consolidate_parent_items

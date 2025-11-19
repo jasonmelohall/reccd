@@ -65,7 +65,7 @@ const ResultsScreen = ({ route }) => {
   };
 
   const renderItem = ({ item }) => (
-    <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item.product_url)}>
+    <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item.link || item.product_url)}>
       <Text style={styles.cardTitle}>{item.title}</Text>
       <Text style={styles.price}>${item.price?.toFixed?.(2) ?? '—'}</Text>
       <View style={styles.metaRow}>
@@ -101,15 +101,18 @@ const ResultsScreen = ({ route }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.header}>Results for “{searchTerm}”</Text>
-      {lastUpdated && (
-        <Text style={styles.subheader}>Updated {lastUpdated.toLocaleTimeString()}</Text>
-      )}
+      <View style={styles.headerContainer}>
+        <Text style={styles.header}>Results for "{searchTerm}"</Text>
+        {lastUpdated && (
+          <Text style={styles.subheader}>Updated {lastUpdated.toLocaleTimeString()}</Text>
+        )}
+      </View>
       <FlatList
         data={items}
         keyExtractor={(item, index) => `${item.asin || index}`}
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
+        style={styles.list}
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={fetchResults} />
         }
@@ -124,8 +127,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F7FAFC',
   },
+  headerContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    backgroundColor: '#F7FAFC',
+  },
+  list: {
+    flex: 1,
+  },
   listContent: {
     padding: 16,
+    paddingBottom: 32,
   },
   centered: {
     flex: 1,
@@ -137,15 +150,12 @@ const styles = StyleSheet.create({
   header: {
     fontSize: 20,
     fontWeight: '700',
-    paddingHorizontal: 16,
-    paddingTop: 16,
     color: '#1A202C',
   },
   subheader: {
     fontSize: 14,
     color: '#4A5568',
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    marginTop: 4,
   },
   card: {
     backgroundColor: '#fff',

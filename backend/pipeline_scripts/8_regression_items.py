@@ -1,21 +1,21 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 
+import os
+import sys
 import pandas as pd
 import numpy as np
 from sqlalchemy import text
-import logging
-from datetime import datetime
-import os
-import sys
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+import logging
+from datetime import datetime
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-SHARED_DIR = os.path.join(os.path.dirname(CURRENT_DIR), "shared")
-if SHARED_DIR not in sys.path:
-    sys.path.insert(0, SHARED_DIR)
+# Add shared directory to path for imports
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SHARED_DIR = os.path.join(BASE_DIR, "shared")
+sys.path.insert(0, SHARED_DIR)
 
 import reccd_items
 

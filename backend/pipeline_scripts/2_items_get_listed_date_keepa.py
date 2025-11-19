@@ -3,16 +3,16 @@
 
 import logging
 import time
+import sys
 from datetime import datetime, timedelta
 import os
 import requests
 from sqlalchemy import text
-import sys
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-SHARED_DIR = os.path.join(os.path.dirname(CURRENT_DIR), "shared")
-if SHARED_DIR not in sys.path:
-    sys.path.insert(0, SHARED_DIR)
+# Add shared directory to path for imports
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SHARED_DIR = os.path.join(BASE_DIR, "shared")
+sys.path.insert(0, SHARED_DIR)
 
 from reccd_items import mysqlengine, get_search_term, get_parent_asin_from_keepa, get_variation_asins_from_keepa
 
