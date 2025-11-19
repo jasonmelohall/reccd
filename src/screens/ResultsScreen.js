@@ -24,15 +24,19 @@ const ResultsScreen = ({ route }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [polling, setPolling] = useState(false);
 
-  const fetchResults = useCallback(async () => {
+  const fetchResults = useCallback(async (isPolling = false) => {
     if (!searchTerm) {
       setError('Missing search term. Go back and try again.');
       setLoading(false);
       return;
     }
 
-    setLoading(true);
+    // Don't show loading spinner during polling (less disruptive)
+    if (!isPolling) {
+      setLoading(true);
+    }
     setError('');
 
     try {
@@ -45,18 +49,65 @@ const ResultsScreen = ({ route }) => {
         throw new Error(data?.detail || 'Failed to load results');
       }
 
-      setItems(data?.items || []);
-      setLastUpdated(new Date());
+      const newItems = data?.items || [];
+      
+      // Always update items when we get new results
+      // During polling, always update to catch pipeline completion even if count stays same
+      if (newItems.length > 0) {
+        setItems((prevItems) => {
+          const countChanged = newItems.length !== prevItems.length;
+          
+          // Update if count changed, or during polling (to catch any updates from pipeline)
+          if (countChanged || isPolling) {
+            setLastUpdated(new Date());
+            // Stop polling once we have substantial results (pipeline likely complete)
+            if (isPolling && newItems.length >= 10) {
+              setPolling(false);
+            }
+            return newItems;
+          }
+          return prevItems;
+        });
+      }
     } catch (err) {
-      setError(err.message);
+      if (!isPolling) {
+        setError(err.message);
+      }
     } finally {
-      setLoading(false);
+      if (!isPolling) {
+        setLoading(false);
+      }
     }
   }, [searchTerm, userId]);
 
+  // Initial fetch
   useEffect(() => {
-    fetchResults();
-  }, [fetchResults]);
+    fetchResults(false);
+  }, [searchTerm, userId]);
+
+  // Auto-refresh polling after initial load (pipeline takes ~2-3 minutes)
+  // Poll for updates to catch when pipeline completes
+  useEffect(() => {
+    if (!searchTerm || loading) return;
+
+    // Always poll after initial load to catch pipeline completion
+    setPolling(true);
+    const pollInterval = setInterval(() => {
+      fetchResults(true);
+    }, 10000); // Poll every 10 seconds
+
+    // Stop polling after 5 minutes (pipeline should be done by then)
+    const timeout = setTimeout(() => {
+      clearInterval(pollInterval);
+      setPolling(false);
+    }, 300000); // 5 minutes
+
+    return () => {
+      clearInterval(pollInterval);
+      clearTimeout(timeout);
+      setPolling(false);
+    };
+  }, [searchTerm, loading, fetchResults]);
 
   const handleOpenProduct = (url) => {
     if (!url) {
