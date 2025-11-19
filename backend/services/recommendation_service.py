@@ -122,7 +122,7 @@ class RecommendationService:
         else:
             search_pattern = search_term
         
-        # Fetch items from database
+        # Fetch items from database (no LIMIT - returns all matching items)
         query = text("""
             SELECT *
             FROM items i
@@ -142,15 +142,22 @@ class RecommendationService:
                 "search_term": search_pattern,
                 "user_id": user_id
             })
-        
-        if len(df) == 0:
-            # Debug: Check what search terms actually exist in the database
-            debug_query = text("SELECT DISTINCT search_term FROM items WHERE search_term LIKE :pattern LIMIT 10")
-            existing_terms = conn.execute(debug_query, {"pattern": search_pattern}).fetchall()
-            logger.info(f"No items found for search term: {search_term} (pattern: {search_pattern})")
-            if existing_terms:
-                logger.info(f"Found similar search terms in DB: {[t[0] for t in existing_terms]}")
-            return [], coefficients, constant
+            
+            if len(df) == 0:
+                # Debug: Check what search terms actually exist in the database
+                debug_query = text("SELECT DISTINCT search_term FROM items WHERE search_term LIKE :pattern LIMIT 10")
+                existing_terms = conn.execute(debug_query, {"pattern": search_pattern}).fetchall()
+                logger.info(f"No items found for search term: {search_term} (pattern: {search_pattern})")
+                if existing_terms:
+                    logger.info(f"Found similar search terms in DB: {[t[0] for t in existing_terms]}")
+                else:
+                    # Check for exact match
+                    exact_query = text("SELECT COUNT(*) as cnt FROM items WHERE search_term = :term")
+                    exact_count = conn.execute(exact_query, {"term": search_term}).fetchone()
+                    logger.info(f"Exact match count for '{search_term}': {exact_count[0] if exact_count else 0}")
+                return [], coefficients, constant
+            
+            logger.info(f"Found {len(df)} items for search term: {search_term}")
         
         # Convert date columns
         df['listed_date'] = pd.to_datetime(df['listed_date'], errors='coerce')
@@ -160,7 +167,7 @@ class RecommendationService:
             errors='coerce'
         )
         
-        # Calculate features
+        # Calculate features (always calculate in memory - scores are relative to current result set)
         today = datetime.datetime.now()
         
         df['recency_days'] = np.nan
@@ -193,8 +200,8 @@ class RecommendationService:
         df['rating_percentile'] = df['rating'].rank(pct=True)
         df['search_rank_percentile'] = df['search_rank'].rank(pct=True)
         
-        # Calculate reccd score
-        df['reccd'] = (
+        # Calculate reccd score (always calculated in memory, relative to current result set)
+        df['reccd_score'] = (
             df['price_percentile'] * coefficients['price_percentile'] +
             df['rating_percentile'] * coefficients['rating_percentile'] +
             df['release_date_percentile'] * coefficients['release_date_percentile'] +
@@ -211,7 +218,7 @@ class RecommendationService:
         if len(items_with_parent) > 0:
             items_with_parent['has_ratings'] = items_with_parent['ratings_total'].notna()
             items_with_parent = items_with_parent.sort_values(
-                ['parent_asin', 'has_ratings', 'reccd', 'search_rank', 'price'],
+                ['parent_asin', 'has_ratings', 'reccd_score', 'search_rank', 'price'],
                 ascending=[True, False, False, True, True]
             )
             items_with_parent = items_with_parent.drop_duplicates(
@@ -222,7 +229,7 @@ class RecommendationService:
         
         # Combine and sort by reccd
         df = pd.concat([items_with_parent, standalone_items], ignore_index=True)
-        df = df.sort_values('reccd', ascending=False).reset_index(drop=True)
+        df = df.sort_values('reccd_score', ascending=False).reset_index(drop=True)
         
         # Convert to dict format for API response
         df['release_date'] = df['release_date'].dt.strftime('%Y-%m-%d')
