@@ -176,14 +176,15 @@ const ResultsScreen = ({ route }) => {
   // Use ScrollView for web (better scrolling), FlatList for native (better performance)
   if (Platform.OS === 'web') {
     return (
-      <View style={styles.container}>
+      <View style={styles.webContainer}>
         <ScrollView
-          style={styles.list}
+          style={styles.webScrollView}
           contentContainerStyle={styles.listContent}
           refreshControl={
             <RefreshControl refreshing={loading} onRefresh={fetchResults} />
           }
           showsVerticalScrollIndicator={true}
+          nestedScrollEnabled={true}
         >
           <ListHeader />
           {items.length === 0 ? (
@@ -238,6 +239,16 @@ const styles = StyleSheet.create({
   listContent: {
     paddingHorizontal: 16,
     paddingBottom: 32,
+  },
+  webContainer: {
+    flex: 1,
+    backgroundColor: '#F7FAFC',
+    height: '100vh',
+    width: '100%',
+  },
+  webScrollView: {
+    flex: 1,
+    height: '100%',
   },
   centered: {
     flex: 1,
