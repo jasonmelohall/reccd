@@ -6,6 +6,7 @@ import {
   Platform,
   RefreshControl,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -172,6 +173,33 @@ const ResultsScreen = ({ route }) => {
     </View>
   );
 
+  // Use ScrollView for web (better scrolling), FlatList for native (better performance)
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.container}>
+        <ScrollView
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
+          refreshControl={
+            <RefreshControl refreshing={loading} onRefresh={fetchResults} />
+          }
+          showsVerticalScrollIndicator={true}
+        >
+          <ListHeader />
+          {items.length === 0 ? (
+            <Text style={styles.empty}>No results yet. Pull to refresh.</Text>
+          ) : (
+            items.map((item, index) => (
+              <View key={`${item.asin || index}`}>
+                {renderItem({ item })}
+              </View>
+            ))
+          )}
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
@@ -188,7 +216,6 @@ const ResultsScreen = ({ route }) => {
         showsVerticalScrollIndicator={true}
         scrollEnabled={true}
         keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled={true}
       />
     </SafeAreaView>
   );
@@ -198,10 +225,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F7FAFC',
-    ...(Platform.OS === 'web' && {
-      height: '100vh',
-      overflow: 'hidden',
-    }),
   },
   headerContainer: {
     paddingHorizontal: 16,
@@ -211,10 +234,6 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
-    ...(Platform.OS === 'web' && {
-      height: '100%',
-      overflowY: 'scroll',
-    }),
   },
   listContent: {
     paddingHorizontal: 16,
