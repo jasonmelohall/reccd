@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Platform,
   RefreshControl,
   SafeAreaView,
   StyleSheet,
@@ -172,7 +173,7 @@ const ResultsScreen = ({ route }) => {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
         data={items}
         keyExtractor={(item, index) => `${item.asin || index}`}
@@ -185,7 +186,8 @@ const ResultsScreen = ({ route }) => {
         }
         ListEmptyComponent={<Text style={styles.empty}>No results yet. Pull to refresh.</Text>}
         showsVerticalScrollIndicator={true}
-        removeClippedSubviews={false}
+        scrollEnabled={true}
+        keyboardShouldPersistTaps="handled"
         nestedScrollEnabled={true}
       />
     </SafeAreaView>
@@ -196,6 +198,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F7FAFC',
+    ...(Platform.OS === 'web' && {
+      height: '100vh',
+      overflow: 'hidden',
+    }),
   },
   headerContainer: {
     paddingHorizontal: 16,
@@ -205,6 +211,10 @@ const styles = StyleSheet.create({
   },
   list: {
     flex: 1,
+    ...(Platform.OS === 'web' && {
+      height: '100%',
+      overflowY: 'scroll',
+    }),
   },
   listContent: {
     paddingHorizontal: 16,
