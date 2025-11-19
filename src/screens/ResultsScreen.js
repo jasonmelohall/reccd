@@ -162,18 +162,22 @@ const ResultsScreen = ({ route }) => {
     );
   }
 
+  const ListHeader = () => (
+    <View style={styles.headerContainer}>
+      <Text style={styles.header}>Results for "{searchTerm}"</Text>
+      {lastUpdated && (
+        <Text style={styles.subheader}>Updated {lastUpdated.toLocaleTimeString()}</Text>
+      )}
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.headerContainer}>
-        <Text style={styles.header}>Results for "{searchTerm}"</Text>
-        {lastUpdated && (
-          <Text style={styles.subheader}>Updated {lastUpdated.toLocaleTimeString()}</Text>
-        )}
-      </View>
       <FlatList
         data={items}
         keyExtractor={(item, index) => `${item.asin || index}`}
         renderItem={renderItem}
+        ListHeaderComponent={ListHeader}
         contentContainerStyle={styles.listContent}
         style={styles.list}
         refreshControl={
@@ -182,6 +186,7 @@ const ResultsScreen = ({ route }) => {
         ListEmptyComponent={<Text style={styles.empty}>No results yet. Pull to refresh.</Text>}
         showsVerticalScrollIndicator={true}
         removeClippedSubviews={false}
+        nestedScrollEnabled={true}
       />
     </SafeAreaView>
   );
@@ -202,7 +207,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listContent: {
-    padding: 16,
+    paddingHorizontal: 16,
     paddingBottom: 32,
   },
   centered: {
