@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  Image,
   RefreshControl,
   SafeAreaView,
   StyleSheet,
@@ -66,15 +67,26 @@ const ResultsScreen = ({ route }) => {
 
   const renderItem = ({ item }) => (
     <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item.link || item.product_url)}>
-      <Text style={styles.cardTitle}>{item.title}</Text>
-      <Text style={styles.price}>${item.price?.toFixed?.(2) ?? '—'}</Text>
-      <View style={styles.metaRow}>
-        <Text style={styles.metaText}>Rating: {item.rating ?? '—'}</Text>
-        <Text style={styles.metaText}>Reviews: {item.ratings_total ?? '—'}</Text>
-      </View>
-      <View style={styles.metaRow}>
-        <Text style={styles.metaText}>Score: {item.reccd_score?.toFixed?.(2) ?? '—'}</Text>
-        <Text style={styles.metaText}>Rank: {item.search_rank ?? '—'}</Text>
+      <View style={styles.cardContent}>
+        {item.image_url && (
+          <Image
+            source={{ uri: item.image_url }}
+            style={styles.productImage}
+            resizeMode="contain"
+          />
+        )}
+        <View style={styles.cardText}>
+          <Text style={styles.cardTitle} numberOfLines={2}>{item.title || 'No title'}</Text>
+          <Text style={styles.price}>${item.price?.toFixed?.(2) ?? '—'}</Text>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaText}>Rating: {item.rating?.toFixed?.(1) ?? '—'}</Text>
+            <Text style={styles.metaText}>Reviews: {item.ratings_total ?? '—'}</Text>
+          </View>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaText}>Score: {item.reccd_score?.toFixed?.(2) ?? '—'}</Text>
+            <Text style={styles.metaText}>Rank: {item.search_rank ?? '—'}</Text>
+          </View>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -117,6 +129,8 @@ const ResultsScreen = ({ route }) => {
           <RefreshControl refreshing={loading} onRefresh={fetchResults} />
         }
         ListEmptyComponent={<Text style={styles.empty}>No results yet. Pull to refresh.</Text>}
+        showsVerticalScrollIndicator={true}
+        removeClippedSubviews={false}
       />
     </SafeAreaView>
   );
@@ -167,6 +181,19 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 10,
     elevation: 2,
+  },
+  cardContent: {
+    flexDirection: 'row',
+  },
+  productImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+    marginRight: 12,
+    backgroundColor: '#F7FAFC',
+  },
+  cardText: {
+    flex: 1,
   },
   cardTitle: {
     fontSize: 16,

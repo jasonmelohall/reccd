@@ -145,16 +145,16 @@ class RecommendationService:
             
             if len(df) == 0:
                 # Debug: Check what search terms actually exist in the database
-                debug_query = text("SELECT DISTINCT search_term FROM items WHERE search_term LIKE :pattern LIMIT 10")
+                debug_query = text("SELECT DISTINCT search_term FROM items WHERE search_term LIKE :pattern LIMIT 20")
                 existing_terms = conn.execute(debug_query, {"pattern": search_pattern}).fetchall()
                 logger.info(f"No items found for search term: {search_term} (pattern: {search_pattern})")
                 if existing_terms:
                     logger.info(f"Found similar search terms in DB: {[t[0] for t in existing_terms]}")
                 else:
-                    # Check for exact match
-                    exact_query = text("SELECT COUNT(*) as cnt FROM items WHERE search_term = :term")
-                    exact_count = conn.execute(exact_query, {"term": search_term}).fetchone()
-                    logger.info(f"Exact match count for '{search_term}': {exact_count[0] if exact_count else 0}")
+                    # Check total count
+                    total_query = text("SELECT COUNT(*) as cnt FROM items")
+                    total_count = conn.execute(total_query).fetchone()
+                    logger.info(f"Total items in database: {total_count[0] if total_count else 0}")
                 return [], coefficients, constant
             
             logger.info(f"Found {len(df)} items for search term: {search_term}")
