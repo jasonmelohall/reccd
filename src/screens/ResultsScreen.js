@@ -111,15 +111,59 @@ const ResultsScreen = ({ route }) => {
     };
   }, [searchTerm, loading, fetchResults]);
 
-  const handleOpenProduct = (url) => {
+  const logClick = async (item) => {
+    try {
+      await fetch(`${API_BASE_URL}/api/click`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          asin: item.asin,
+          parent_asin: item.parent_asin || null,
+          title: item.title || null,
+          price: item.price || null,
+          rating: item.rating || null,
+          ratings_total: item.ratings_total || null,
+          frequency: item.frequency || null,
+          search_rank: item.search_rank || null,
+          release_date: item.release_date || null,
+          reccd_score: item.reccd_score || null,
+          price_percentile: item.price_percentile || null,
+          rating_percentile: item.rating_percentile || null,
+          release_date_percentile: item.release_date_percentile || null,
+          frequency_percentile: item.frequency_percentile || null,
+          search_rank_percentile: item.search_rank_percentile || null,
+          search_term: searchTerm,
+          is_relevant: true,
+        }),
+      });
+    } catch (err) {
+      // Silently fail - don't block user from opening product
+      console.error('Failed to log click:', err);
+    }
+  };
+
+  const handleOpenProduct = async (item) => {
+    if (!item) {
+      return;
+    }
+    
+    const url = item.link || item.product_url;
     if (!url) {
       return;
     }
+    
+    // Log the click event (same as purchase logging)
+    await logClick(item);
+    
+    // Open the product URL
     Linking.openURL(url).catch(() => {});
   };
 
   const renderItem = ({ item }) => (
-    <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item.link || item.product_url)}>
+    <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item)}>
       <View style={styles.cardContent}>
         {item.image_url && (
           <Image
