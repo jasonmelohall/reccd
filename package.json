@@ -8,7 +8,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "prebuild:web": "node scripts/create-placeholder-assets.js",
-    "build:web": "npm run prebuild:web && expo export -p web"
+    "build:web": "npm run prebuild:web && expo export -p web --output-dir web-build"
   },
   "dependencies": {
     "@react-navigation/native": "^6.1.9",
