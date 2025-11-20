@@ -183,6 +183,9 @@ const ResultsScreen = ({ route }) => {
             <Text style={styles.metaText}>Score: {item.reccd_score?.toFixed?.(2) ?? '—'}</Text>
             <Text style={styles.metaText}>Rank: {item.search_rank ?? '—'}</Text>
           </View>
+          <View style={styles.metaRow}>
+            <Text style={styles.metaText}>Frequency: {item.frequency?.toFixed?.(2) ?? '—'}</Text>
+          </View>
         </View>
       </View>
     </TouchableOpacity>
