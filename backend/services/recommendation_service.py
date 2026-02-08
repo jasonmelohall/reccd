@@ -147,7 +147,7 @@ class RecommendationService:
                     "CONCAT('|', COALESCE(i.search_term, ''), '|') LIKE CONCAT('%|', :" + key + ", '|%')"
                 )
             where_clause = " OR ".join(conditions)
-            query = text("""
+            query_str = """
                 SELECT *
                 FROM items i
                 WHERE (""" + where_clause + """)
@@ -159,9 +159,9 @@ class RecommendationService:
                     AND u.is_relevant = 0
                     AND u.search_term = i.search_term
                 )
-            """)
+            """
             with get_db_connection() as conn:
-                df = pd.read_sql(query, conn, params=params)
+                df = pd.read_sql(query_str, conn, params=params)
         else:
             if wildcard_mode == 'both_ends':
                 search_pattern = f"%{search_term}%"
