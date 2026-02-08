@@ -16,6 +16,7 @@ import subprocess
 import logging
 import os
 import sys
+from typing import List, Union
 
 logger = logging.getLogger(__name__)
 
@@ -40,23 +41,22 @@ class PipelineService:
             "2_items_get_listed_date_keepa.py": 1200,  # Keepa calls can take longer
         }
     
-    def run_full_pipeline(self, search_term: str):
+    def run_full_pipeline(self, search_term: Union[str, List[str]]):
         """
-        Run the full items pipeline for a search term.
+        Run the full items pipeline for one or more search terms.
         This will take approximately 5 minutes.
         
         Args:
-            search_term: The search term to process
+            search_term: Single search term (str) or list of terms (GenAI multi-term)
             
         Returns:
             dict with status and any error messages
         """
-        logger.info(f"Starting full pipeline for search term: '{search_term}'")
+        search_terms = [search_term] if isinstance(search_term, str) else list(search_term)
+        logger.info("Starting full pipeline for search term(s): %s", search_terms)
         
-        # Update the search term in reccd_items.py temporarily
-        # (This is a simple approach - in production you might want to pass it as env var)
         original_search_terms = self._get_current_search_terms()
-        self._update_search_terms([search_term])
+        self._update_search_terms(search_terms)
         
         try:
             for script in self.scripts:
@@ -98,10 +98,10 @@ class PipelineService:
                         "error": str(e)
                     }
             
-            logger.info(f"✅ Full pipeline completed successfully for '{search_term}'")
+            logger.info("✅ Full pipeline completed successfully for %s", search_terms)
             return {
                 "status": "completed",
-                "message": f"Pipeline completed successfully for '{search_term}'"
+                "message": f"Pipeline completed successfully for {len(search_terms)} term(s)"
             }
         
         finally:

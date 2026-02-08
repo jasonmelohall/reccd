@@ -6,10 +6,20 @@ import numpy as np
 from sqlalchemy import text
 import datetime
 import logging
+from typing import List, Optional
+
 from database import get_db_connection
 from config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _search_terms_list(stored: Optional[str]) -> List[str]:
+    """Split stored search_term (pipe-separated or single) into list for API."""
+    if not stored or not isinstance(stored, str):
+        return []
+    parts = [p.strip() for p in stored.split("|") if p.strip()]
+    return parts if parts else [stored]
 settings = get_settings()
 
 
@@ -94,71 +104,98 @@ class RecommendationService:
             
             return coefficients, constant
     
-    def get_recommendations(self, search_term: str, user_id: int = None, wildcard_mode: str = 'both_ends'):
+    def get_recommendations(
+        self,
+        search_term: Optional[str] = None,
+        search_terms: Optional[List[str]] = None,
+        user_id: int = None,
+        wildcard_mode: str = 'both_ends',
+    ):
         """
-        Get personalized recommendations for a search term
+        Get personalized recommendations for a search term or multiple terms (GenAI).
         
         Args:
-            search_term: Search term to filter items
+            search_term: Single search term (regular mode).
+            search_terms: List of terms (GenAI mode); matches items whose stored
+                search_term contains any of these (pipe-delimited or single).
             user_id: User ID (defaults to settings.user_id)
-            wildcard_mode: How to apply wildcards ('both_ends', 'start_only', 'end_only', 'none')
+            wildcard_mode: For single search_term only ('both_ends', etc.)
             
         Returns:
-            List of recommended items with scores
+            Tuple of (list of items with scores, coefficients dict, constant).
+            Each item includes 'search_terms' (list) derived by splitting stored search_term on '|'.
         """
         if user_id is None:
             user_id = self.user_id
-        
-        # Load user coefficients
+
+        use_multi = search_terms and len(search_terms) > 0
+        if not use_multi and not search_term:
+            coeffs, const = self.load_user_coefficients()
+            return [], coeffs, const
+
         coefficients, constant = self.load_user_coefficients()
-        
-        # Apply wildcards to search term
-        if wildcard_mode == 'both_ends':
-            search_pattern = f"%{search_term}%"
-        elif wildcard_mode == 'start_only':
-            search_pattern = f"%{search_term}"
-        elif wildcard_mode == 'end_only':
-            search_pattern = f"{search_term}%"
+
+        if use_multi:
+            # Match rows where stored search_term (pipe-separated or single) contains any term
+            # Use CONCAT('|', search_term, '|') LIKE '%|term|%' to avoid substring false positives
+            conditions = []
+            params = {"user_id": user_id}
+            for i, term in enumerate(search_terms):
+                key = f"term_{i}"
+                params[key] = term
+                conditions.append(
+                    "CONCAT('|', COALESCE(i.search_term, ''), '|') LIKE CONCAT('%|', :" + key + ", '|%')"
+                )
+            where_clause = " OR ".join(conditions)
+            query = text("""
+                SELECT *
+                FROM items i
+                WHERE (""" + where_clause + """)
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM items_user u
+                    WHERE u.user_id = :user_id
+                    AND u.asin = i.asin
+                    AND u.is_relevant = 0
+                    AND u.search_term = i.search_term
+                )
+            """)
+            with get_db_connection() as conn:
+                df = pd.read_sql(query, conn, params=params)
         else:
-            search_pattern = search_term
-        
-        # Fetch items from database (no LIMIT - returns all matching items)
-        query = text("""
-            SELECT *
-            FROM items i
-            WHERE i.search_term LIKE :search_term
-            AND NOT EXISTS (
-                SELECT 1
-                FROM items_user u
-                WHERE u.user_id = :user_id
-                AND u.asin = i.asin
-                AND u.is_relevant = 0
-                AND u.search_term = i.search_term
-            )
-        """)
-        
-        with get_db_connection() as conn:
-            df = pd.read_sql(query, conn, params={
-                "search_term": search_pattern,
-                "user_id": user_id
-            })
-            
-            if len(df) == 0:
-                # Debug: Check what search terms actually exist in the database
-                debug_query = text("SELECT DISTINCT search_term FROM items WHERE search_term LIKE :pattern LIMIT 20")
-                existing_terms = conn.execute(debug_query, {"pattern": search_pattern}).fetchall()
-                logger.info(f"No items found for search term: {search_term} (pattern: {search_pattern})")
-                if existing_terms:
-                    logger.info(f"Found similar search terms in DB: {[t[0] for t in existing_terms]}")
-                else:
-                    # Check total count
-                    total_query = text("SELECT COUNT(*) as cnt FROM items")
-                    total_count = conn.execute(total_query).fetchone()
-                    logger.info(f"Total items in database: {total_count[0] if total_count else 0}")
-                return [], coefficients, constant
-            
-            logger.info(f"Found {len(df)} items for search term: {search_term}")
-        
+            if wildcard_mode == 'both_ends':
+                search_pattern = f"%{search_term}%"
+            elif wildcard_mode == 'start_only':
+                search_pattern = f"%{search_term}"
+            elif wildcard_mode == 'end_only':
+                search_pattern = f"{search_term}%"
+            else:
+                search_pattern = search_term
+
+            query = text("""
+                SELECT *
+                FROM items i
+                WHERE i.search_term LIKE :search_term
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM items_user u
+                    WHERE u.user_id = :user_id
+                    AND u.asin = i.asin
+                    AND u.is_relevant = 0
+                    AND u.search_term = i.search_term
+                )
+            """)
+            with get_db_connection() as conn:
+                df = pd.read_sql(query, conn, params={
+                    "search_term": search_pattern,
+                    "user_id": user_id
+                })
+
+        if len(df) == 0:
+            logger.info("No items found for search (term=%s, terms=%s)", search_term, search_terms)
+            return [], coefficients, constant
+        logger.info("Found %s items for search", len(df))
+
         # Convert date columns
         df['listed_date'] = pd.to_datetime(df['listed_date'], errors='coerce')
         df['oldest_review'] = pd.to_datetime(df['oldest_review'], errors='coerce')
@@ -237,9 +274,11 @@ class RecommendationService:
         # Replace NaN and inf values with None for JSON serialization
         df = df.replace([np.nan, np.inf, -np.inf], None)
         
-        # Convert to list of dicts
+        # Convert to list of dicts and add search_terms (split pipe-separated) for frontend
         items = df.to_dict('records')
-        
+        for item in items:
+            item['search_terms'] = _search_terms_list(item.get('search_term'))
+
         return items, coefficients, constant
 
 

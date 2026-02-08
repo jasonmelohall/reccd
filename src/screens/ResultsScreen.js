@@ -21,30 +21,33 @@ const API_BASE_URL =
   'https://reccd-web-service.onrender.com';
 
 const ResultsScreen = ({ route }) => {
-  const { searchTerm, userId = 1 } = route.params || {};
+  const { searchTerm, searchTerms, userId = 1 } = route.params || {};
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [polling, setPolling] = useState(false);
+  const isGenAI = searchTerms && searchTerms.length > 0;
+  const [selectedPills, setSelectedPills] = useState(() =>
+    isGenAI ? searchTerms.reduce((acc, t) => ({ ...acc, [t]: true }), {}) : {}
+  );
 
   const fetchResults = useCallback(async (isPolling = false) => {
-    if (!searchTerm) {
+    const hasTerm = searchTerm || (searchTerms && searchTerms.length > 0);
+    if (!hasTerm) {
       setError('Missing search term. Go back and try again.');
       setLoading(false);
       return;
     }
 
-    // Don't show loading spinner during polling (less disruptive)
-    if (!isPolling) {
-      setLoading(true);
-    }
+    if (!isPolling) setLoading(true);
     setError('');
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}/api/results?search_term=${encodeURIComponent(searchTerm)}&user_id=${userId}`
-      );
+      const url = isGenAI
+        ? `${API_BASE_URL}/api/results?${searchTerms.map((t) => `search_terms=${encodeURIComponent(t)}`).join('&')}&user_id=${userId}`
+        : `${API_BASE_URL}/api/results?search_term=${encodeURIComponent(searchTerm)}&user_id=${userId}`;
+      const response = await fetch(url);
       const data = await response.json();
 
       if (!response.ok) {
@@ -80,17 +83,25 @@ const ResultsScreen = ({ route }) => {
         setLoading(false);
       }
     }
-  }, [searchTerm, userId]);
+  }, [searchTerm, searchTerms, userId, isGenAI]);
+
+  useEffect(() => {
+    if (isGenAI && searchTerms?.length) {
+      setSelectedPills((prev) =>
+        searchTerms.reduce((acc, t) => ({ ...acc, [t]: prev[t] !== false }), {})
+      );
+    }
+  }, [isGenAI, searchTerms]);
 
   // Initial fetch
   useEffect(() => {
     fetchResults(false);
-  }, [searchTerm, userId]);
+  }, [searchTerm, searchTerms, userId]);
 
   // Auto-refresh polling after initial load (pipeline takes ~2-3 minutes)
-  // Poll for updates to catch when pipeline completes
   useEffect(() => {
-    if (!searchTerm || loading) return;
+    const hasTerm = searchTerm || (searchTerms && searchTerms.length > 0);
+    if (!hasTerm || loading) return;
 
     // Always poll after initial load to catch pipeline completion
     setPolling(true);
@@ -109,7 +120,7 @@ const ResultsScreen = ({ route }) => {
       clearTimeout(timeout);
       setPolling(false);
     };
-  }, [searchTerm, loading, fetchResults]);
+  }, [searchTerm, searchTerms, loading, fetchResults]);
 
   const logClick = async (item) => {
     try {
@@ -135,7 +146,7 @@ const ResultsScreen = ({ route }) => {
           release_date_percentile: item.release_date_percentile || null,
           frequency_percentile: item.frequency_percentile || null,
           search_rank_percentile: item.search_rank_percentile || null,
-          search_term: searchTerm,
+          search_term: item.search_term || searchTerm,
           is_relevant: true,
         }),
       });
@@ -162,6 +173,11 @@ const ResultsScreen = ({ route }) => {
     Linking.openURL(url).catch(() => {});
   };
 
+  const itemTerms = (item) => (item.search_terms && item.search_terms.length > 0 ? item.search_terms : (item.search_term ? [item.search_term] : []));
+  const visibleItems = isGenAI && Object.keys(selectedPills).length > 0
+    ? items.filter((item) => itemTerms(item).some((t) => selectedPills[t]))
+    : items;
+
   const renderItem = ({ item }) => (
     <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item)}>
       <View style={styles.cardContent}>
@@ -174,6 +190,15 @@ const ResultsScreen = ({ route }) => {
         )}
         <View style={styles.cardText}>
           <Text style={styles.cardTitle} numberOfLines={2}>{item.title || 'No title'}</Text>
+          {isGenAI && itemTerms(item).length > 0 && (
+            <View style={styles.badgeRow}>
+              {itemTerms(item).map((t) => (
+                <View key={t} style={styles.badge}>
+                  <Text style={styles.badgeText} numberOfLines={1}>{t}</Text>
+                </View>
+              ))}
+            </View>
+          )}
           <Text style={styles.price}>${item.price?.toFixed?.(2) ?? '—'}</Text>
           <View style={styles.metaRow}>
             <Text style={styles.metaText}>Rating: {item.rating?.toFixed?.(1) ?? '—'}</Text>
@@ -185,6 +210,7 @@ const ResultsScreen = ({ route }) => {
           </View>
           <View style={styles.metaRow}>
             <Text style={styles.metaText}>Frequency: {item.frequency?.toFixed?.(2) ?? '—'}</Text>
+            <Text style={styles.metaText}>Release: {item.release_date ?? '—'}</Text>
           </View>
         </View>
       </View>
@@ -211,16 +237,38 @@ const ResultsScreen = ({ route }) => {
     );
   }
 
+  const pillCount = (term) => items.filter((item) => itemTerms(item).includes(term)).length;
+
   const ListHeader = () => (
     <View style={styles.headerContainer}>
-      <Text style={styles.header}>Results for "{searchTerm}"</Text>
+      <Text style={styles.header}>
+        {isGenAI ? 'GenAI results' : `Results for "${searchTerm}"`}
+      </Text>
       {lastUpdated && (
         <Text style={styles.subheader}>Updated {lastUpdated.toLocaleTimeString()}</Text>
+      )}
+      {isGenAI && searchTerms.length > 0 && (
+        <View style={styles.pillRow}>
+          {searchTerms.map((term) => {
+            const selected = selectedPills[term] !== false;
+            const count = pillCount(term);
+            return (
+              <TouchableOpacity
+                key={term}
+                style={[styles.pill, selected && styles.pillSelected]}
+                onPress={() => setSelectedPills((prev) => ({ ...prev, [term]: !prev[term] }))}
+              >
+                <Text style={[styles.pillText, selected && styles.pillTextSelected]} numberOfLines={1}>
+                  {term} ({count})
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       )}
     </View>
   );
 
-  // Use ScrollView for web (better scrolling), FlatList for native (better performance)
   if (Platform.OS === 'web') {
     return (
       <View style={styles.webContainer}>
@@ -228,16 +276,16 @@ const ResultsScreen = ({ route }) => {
           style={styles.webScrollView}
           contentContainerStyle={styles.listContent}
           refreshControl={
-            <RefreshControl refreshing={loading} onRefresh={fetchResults} />
+            <RefreshControl refreshing={loading} onRefresh={() => fetchResults(false)} />
           }
           showsVerticalScrollIndicator={true}
           nestedScrollEnabled={true}
         >
           <ListHeader />
-          {items.length === 0 ? (
+          {visibleItems.length === 0 ? (
             <Text style={styles.empty}>No results yet. Pull to refresh.</Text>
           ) : (
-            items.map((item, index) => (
+            visibleItems.map((item, index) => (
               <View key={`${item.asin || index}`}>
                 {renderItem({ item })}
               </View>
@@ -251,14 +299,14 @@ const ResultsScreen = ({ route }) => {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <FlatList
-        data={items}
+        data={visibleItems}
         keyExtractor={(item, index) => `${item.asin || index}`}
         renderItem={renderItem}
         ListHeaderComponent={ListHeader}
         contentContainerStyle={styles.listContent}
         style={styles.list}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={fetchResults} />
+          <RefreshControl refreshing={loading} onRefresh={() => fetchResults(false)} />
         }
         ListEmptyComponent={<Text style={styles.empty}>No results yet. Pull to refresh.</Text>}
         showsVerticalScrollIndicator={true}
@@ -313,6 +361,46 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#4A5568',
     marginTop: 4,
+  },
+  pillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  pill: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    backgroundColor: '#E2E8F0',
+  },
+  pillSelected: {
+    backgroundColor: '#FF9900',
+  },
+  pillText: {
+    fontSize: 12,
+    color: '#4A5568',
+  },
+  pillTextSelected: {
+    color: '#111',
+    fontWeight: '600',
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginBottom: 6,
+  },
+  badge: {
+    backgroundColor: '#EDF2F7',
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: 4,
+    maxWidth: 120,
+  },
+  badgeText: {
+    fontSize: 10,
+    color: '#4A5568',
   },
   card: {
     backgroundColor: '#fff',

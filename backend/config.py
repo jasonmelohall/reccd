@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     rainforest_api_key: str
     keepa_api_key: str
     amazon_associate_tag: str = "reccd-20"
+    openai_api_key: str | None = None
     
     # App
     user_id: int = 1

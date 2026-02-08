@@ -7,8 +7,12 @@ from datetime import datetime
 
 
 class SearchRequest(BaseModel):
-    search_term: str = Field(..., min_length=1, max_length=200)
+    """Regular search: search_term. GenAI search: genai=True, user_input, num_terms."""
+    search_term: Optional[str] = Field(None, min_length=1, max_length=200)
     user_id: int = Field(default=1, ge=1)
+    genai: bool = False
+    user_input: Optional[str] = Field(None, max_length=2000)
+    num_terms: int = Field(default=3, ge=1, le=10)
 
 
 class SearchResponse(BaseModel):
@@ -16,6 +20,7 @@ class SearchResponse(BaseModel):
     status: str
     message: str
     items_found: Optional[int] = None
+    search_terms: Optional[List[str]] = None
 
 
 class ProductItem(BaseModel):
@@ -37,6 +42,7 @@ class ProductItem(BaseModel):
     search_rank_percentile: Optional[float] = None
     frequency: Optional[float] = None
     last_update: Optional[datetime] = None
+    search_terms: Optional[List[str]] = None  # For GenAI: terms that found this item (split from pipe)
 
 
 class ResultsResponse(BaseModel):
@@ -45,6 +51,7 @@ class ResultsResponse(BaseModel):
     total_results: int
     items: List[ProductItem]
     coefficients: Optional[dict] = None
+    search_terms: Optional[List[str]] = None  # When multi-term request
 
 
 class HealthResponse(BaseModel):

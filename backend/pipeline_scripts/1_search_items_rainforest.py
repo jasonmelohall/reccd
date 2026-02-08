@@ -169,11 +169,12 @@ def save_items_batch(consolidated_items):
 # === Main ===
 if __name__ == "__main__":
     if isinstance(SEARCH_TERMS, str):
-        SEARCH_TERMS = [SEARCH_TERMS]  # ✅ Fallback in case get_search_term() still returns a single term
+        SEARCH_TERMS = [SEARCH_TERMS]  # Fallback in case get_search_term() still returns a single term
 
     # Collect ALL items across ALL search terms before consolidating
     all_items_global = {}  # Map child_asin -> item_data (global across all searches)
-    
+    parent_terms = {}  # parent_asin -> set of terms that found this product (for multi-term pipe-separated)
+
     for term in SEARCH_TERMS:
         logging.info(f"=== Processing search term: {term} ===")
         
@@ -188,19 +189,26 @@ if __name__ == "__main__":
                     item_data = extract_item_data(item, term, search_rank)
                     if item_data:
                         child_asin = item_data['asin']
+                        parent_asin = item_data.get('parent_asin') or child_asin
+                        parent_terms.setdefault(parent_asin, set()).add(term)
                         # If this ASIN already exists (from another search), keep the better one
                         if child_asin in all_items_global:
                             existing = all_items_global[child_asin]
-                            # Keep the one with better search rank
                             if search_rank < existing['search_rank']:
                                 all_items_global[child_asin] = item_data
                         else:
                             all_items_global[child_asin] = item_data
-    
+
     # Now consolidate by parent ASIN across ALL search terms
     logging.info(f"Collected {len(all_items_global)} unique items across all searches, consolidating by parent ASIN...")
     consolidated = consolidate_parent_items(all_items_global)
     logging.info(f"Consolidated to {len(consolidated)} parent items")
+
+    # When multiple search terms: store pipe-separated list in search_term for each parent
+    if len(SEARCH_TERMS) > 1:
+        for parent_asin, item_data in consolidated.items():
+            terms_for_parent = parent_terms.get(parent_asin, [item_data['search_term']])
+            item_data['search_term'] = '|'.join(sorted(terms_for_parent))[:255]  # varchar(255) cap
     
     # Save all consolidated items at once
     save_items_batch(consolidated)

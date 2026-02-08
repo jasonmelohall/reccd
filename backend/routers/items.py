@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from typing import List, Optional, Union
+
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from models.schemas import (
     SearchRequest,
     SearchResponse,
@@ -12,6 +14,7 @@ from models.schemas import (
 from services.search_service import search_service
 from services.recommendation_service import recommendation_service
 from services.pipeline_service import pipeline_service
+from services.openai_service import generate_search_terms
 from database import get_db_connection
 from sqlalchemy import text
 import datetime
@@ -21,109 +24,133 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["items"])
 
 
-def run_full_pipeline_background(search_term: str):
+def run_full_pipeline_background(search_term: Union[str, List[str]]):
     """
     Background task to run the complete items pipeline.
-    This includes:
-    1. Search items (Rainforest API)
-    2. Get listed dates (Keepa API)  
-    3. Get first available dates (Rainforest API)
-    4. Run regression to update user coefficients
-    5. Calculate recommendations
-    
+    Accepts a single term (str) or list of terms (GenAI).
     Takes approximately 5 minutes to complete.
     """
     try:
-        logger.info(f"Starting full pipeline for '{search_term}'")
+        logger.info("Starting full pipeline for %s", search_term)
         result = pipeline_service.run_full_pipeline(search_term)
-        
         if result['status'] == 'completed':
-            logger.info(f"✅ Pipeline completed successfully for '{search_term}'")
+            logger.info("Pipeline completed successfully")
         else:
-            logger.error(f"❌ Pipeline failed for '{search_term}': {result.get('message')}")
-            
+            logger.error("Pipeline failed: %s", result.get('message'))
     except Exception as e:
-        logger.error(f"Pipeline background task failed for '{search_term}': {e}", exc_info=True)
+        logger.error("Pipeline background task failed: %s", e, exc_info=True)
 
 
 @router.post("/search", response_model=SearchResponse)
 async def search_items(request: SearchRequest, background_tasks: BackgroundTasks):
     """
-    Initiate a search for items
-    
-    Always runs the full pipeline to get fresh Amazon rankings:
-    - Search Amazon via Rainforest API
-    - Get product dates via Keepa API
-    - Get additional details via Rainforest API
-    - Update ML regression coefficients
-    
-    Takes approximately 2-3 minutes to complete.
+    Initiate a search for items. Regular mode: search_term. GenAI mode: genai=True, user_input, num_terms.
+    Returns search_terms in response for GenAI so client can show pills on Results.
     """
     try:
-        # Check if we have existing results to show while pipeline runs
+        if request.genai and request.user_input:
+            # GenAI: generate terms, run pipeline with list, return terms for Results pills
+            raw = (request.user_input or "").strip()
+            if not raw:
+                raise HTTPException(status_code=400, detail="user_input required for GenAI search")
+            num_terms = max(1, min(10, request.num_terms))
+            search_terms = generate_search_terms(raw, num_terms)
+            if not search_terms:
+                search_terms = [raw]
+            primary = search_terms[0]
+            items, _, _ = recommendation_service.get_recommendations(
+                search_terms=search_terms,
+                user_id=request.user_id
+            )
+            items_count = len(items)
+            background_tasks.add_task(run_full_pipeline_background, search_terms)
+            logger.info("GenAI search: running pipeline for %s terms", len(search_terms))
+            if items_count > 0:
+                return SearchResponse(
+                    search_term=primary,
+                    status="refreshing",
+                    message=f"Showing {items_count} existing results while we fetch the latest. Pull down to refresh in 2-3 minutes.",
+                    items_found=items_count,
+                    search_terms=search_terms,
+                )
+            return SearchResponse(
+                search_term=primary,
+                status="processing",
+                message="Analyzing products... This takes 2-3 minutes. Pull down to check for results.",
+                items_found=0,
+                search_terms=search_terms,
+            )
+        # Regular search
+        if not request.search_term or not request.search_term.strip():
+            raise HTTPException(status_code=400, detail="search_term required for regular search")
+        st = request.search_term.strip()
         items, _, _ = recommendation_service.get_recommendations(
-            search_term=request.search_term,
+            search_term=st,
             user_id=request.user_id
         )
-        
         items_count = len(items)
-        
-        # Always run pipeline in background to get fresh rankings
-        background_tasks.add_task(run_full_pipeline_background, request.search_term)
-        logger.info(f"Running full pipeline for '{request.search_term}'")
-        
+        background_tasks.add_task(run_full_pipeline_background, st)
+        logger.info("Running full pipeline for '%s'", st)
         if items_count > 0:
-            # We have old results - show them while refreshing
             return SearchResponse(
-                search_term=request.search_term,
+                search_term=st,
                 status="refreshing",
                 message=f"Showing {items_count} existing results while we fetch the latest rankings. Pull down to refresh in 2-3 minutes.",
                 items_found=items_count
             )
-        else:
-            # No results - need to wait for pipeline
-            return SearchResponse(
-                search_term=request.search_term,
-                status="processing",
-                message=f"Analyzing products for '{request.search_term}'... This takes 2-3 minutes. Pull down to check for results.",
-                items_found=0
-            )
+        return SearchResponse(
+            search_term=st,
+            status="processing",
+            message=f"Analyzing products for '{st}'... This takes 2-3 minutes. Pull down to check for results.",
+            items_found=0
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Search endpoint error: {e}")
+        logger.error("Search endpoint error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/results", response_model=ResultsResponse)
-async def get_results(search_term: str, user_id: int = 1):
+async def get_results(
+    search_term: Optional[str] = Query(None),
+    search_terms: Optional[List[str]] = Query(None, alias="search_terms"),
+    user_id: int = 1,
+):
     """
-    Get personalized recommendations for a search term
-    
-    Returns items ranked by the Reccd ML algorithm based on user preferences.
+    Get personalized recommendations. Pass search_term (single) or search_terms (multi-term GenAI).
     """
     try:
-        items, coefficients, constant = recommendation_service.get_recommendations(
-            search_term=search_term,
-            user_id=user_id
-        )
-        
-        # Convert to Pydantic models
+        if search_terms and len(search_terms) > 0:
+            items, coefficients, constant = recommendation_service.get_recommendations(
+                search_terms=search_terms,
+                user_id=user_id
+            )
+            primary = search_terms[0]
+        else:
+            if not search_term:
+                raise HTTPException(status_code=400, detail="search_term or search_terms required")
+            items, coefficients, constant = recommendation_service.get_recommendations(
+                search_term=search_term,
+                user_id=user_id
+            )
+            primary = search_term
+
         product_items = [ProductItem(**item) for item in items]
-        
-        # Format coefficients for response
-        coeffs_dict = {
-            **coefficients,
-            'constant': constant
-        }
-        
+        coeffs_dict = {**coefficients, 'constant': constant}
+
         return ResultsResponse(
-            search_term=search_term,
+            search_term=primary,
             user_id=user_id,
             total_results=len(product_items),
             items=product_items,
-            coefficients=coeffs_dict
+            coefficients=coeffs_dict,
+            search_terms=search_terms if search_terms else None,
         )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Results endpoint error: {e}")
+        logger.error("Results endpoint error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -129,6 +129,7 @@ total_updated = 0
 for term in SEARCH_TERMS:
     logger.info(f"=== Processing search term: {term} ===")
 
+    # Match pipe-separated or single search_term (whole-segment match)
     select_query = text("""
         SELECT asin, release_date, ratings_total
         FROM items
@@ -139,14 +140,17 @@ for term in SEARCH_TERMS:
                 OR listed_last_update < NOW() - INTERVAL 7 DAY
             )
         )
-        AND search_term LIKE :search_term
+        AND (
+            search_term = :term
+            OR CONCAT('|', COALESCE(search_term, ''), '|') LIKE CONCAT('%|', :term, '|%')
+        )
         ORDER BY rating DESC
         LIMIT :limit
     """)
 
     rows = conn.execute(select_query, {
         'limit': MAX_RECORDS,
-        'search_term': f"%{term}%"
+        'term': term
     }).mappings()
 
     asin_rows = list(rows)
