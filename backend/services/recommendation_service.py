@@ -161,7 +161,12 @@ class RecommendationService:
                 )
             """
             with get_db_connection() as conn:
-                df = pd.read_sql(query_str, conn, params=params)
+                result = conn.execute(text(query_str), params)
+                rows = result.fetchall()
+                if not rows:
+                    df = pd.DataFrame()
+                else:
+                    df = pd.DataFrame(rows, columns=result.keys())
         else:
             if wildcard_mode == 'both_ends':
                 search_pattern = f"%{search_term}%"
