@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -41,8 +41,10 @@ const ResultsScreen = ({ route }) => {
     isGenAI ? searchTerms.reduce((acc, t) => ({ ...acc, [t]: true }), {}) : {}
   );
 
+  const [pipelineStartTime] = useState(() => Date.now());
   const pipelineInProgress = items.length === 0 && polling;
   const showEmptyState = items.length === 0 && !loading && !polling;
+  const pipelineTakingLong = pipelineInProgress && (Date.now() - pipelineStartTime > 120000); // 2 min
 
   const fetchResults = useCallback(async (isPolling = false) => {
     const hasTerm = searchTerm || (searchTerms && searchTerms.length > 0);
@@ -87,6 +89,9 @@ const ResultsScreen = ({ route }) => {
     }
   }, [searchTerm, searchTerms, userId, isGenAI]);
 
+  const fetchResultsRef = useRef(fetchResults);
+  fetchResultsRef.current = fetchResults;
+
   useEffect(() => {
     if (isGenAI && searchTerms?.length) {
       setSelectedPills((prev) =>
@@ -109,29 +114,29 @@ const ResultsScreen = ({ route }) => {
     return () => clearInterval(interval);
   }, [pipelineInProgress]);
 
-  // Auto-refresh polling after initial load (pipeline takes ~2-3 minutes)
+  // Poll every 10s after initial load; use ref so interval is not recreated every render
   useEffect(() => {
     const hasTerm = searchTerm || (searchTerms && searchTerms.length > 0);
     if (!hasTerm || loading) return;
 
-    // Always poll after initial load to catch pipeline completion
     setPolling(true);
+    const firstPollTimer = setTimeout(() => fetchResultsRef.current(true), 5000);
     const pollInterval = setInterval(() => {
-      fetchResults(true);
-    }, 10000); // Poll every 10 seconds
+      fetchResultsRef.current(true);
+    }, 10000);
 
-    // Stop polling after 5 minutes (pipeline should be done by then)
     const timeout = setTimeout(() => {
       clearInterval(pollInterval);
       setPolling(false);
-    }, 300000); // 5 minutes
+    }, 300000);
 
     return () => {
+      clearTimeout(firstPollTimer);
       clearInterval(pollInterval);
       clearTimeout(timeout);
       setPolling(false);
     };
-  }, [searchTerm, searchTerms, loading, fetchResults]);
+  }, [searchTerm, searchTerms, loading]);
 
   const logClick = async (item) => {
     try {
@@ -313,7 +318,7 @@ const ResultsScreen = ({ route }) => {
           nestedScrollEnabled={true}
         >
           <ListHeader />
-          {visibleItems.length === 0 ? (
+            {visibleItems.length === 0 ? (
             <View style={styles.emptyContainer}>
               {pipelineInProgress ? (
                 <>
@@ -322,6 +327,9 @@ const ResultsScreen = ({ route }) => {
                     {PIPELINE_STATUS_MESSAGES[pipelineStatusIndex]}
                   </Text>
                   <Text style={styles.emptySubtext}>Updating every 10 seconds. Pull to refresh.</Text>
+                  {pipelineTakingLong && (
+                    <Text style={styles.takingLong}>Taking longer than usual. Pull to refresh.</Text>
+                  )}
                 </>
               ) : showEmptyState ? (
                 <Text style={styles.empty}>No results yet. Pull to refresh.</Text>
@@ -360,6 +368,9 @@ const ResultsScreen = ({ route }) => {
                   {PIPELINE_STATUS_MESSAGES[pipelineStatusIndex]}
                 </Text>
                 <Text style={styles.emptySubtext}>Updating every 10 seconds. Pull to refresh.</Text>
+                {pipelineTakingLong && (
+                  <Text style={styles.takingLong}>Taking longer than usual. Pull to refresh.</Text>
+                )}
               </>
             ) : showEmptyState ? (
               <Text style={styles.empty}>No results yet. Pull to refresh.</Text>
@@ -528,6 +539,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 14,
     color: '#718096',
+    textAlign: 'center',
+  },
+  takingLong: {
+    marginTop: 12,
+    fontSize: 14,
+    color: '#C53030',
+    fontWeight: '500',
     textAlign: 'center',
   },
   empty: {
