@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["items"])
 
 
+def _sanitize_search_input(s: str) -> str:
+    """Remove/escape chars that can break requests (e.g. double-quote)."""
+    if not s or not isinstance(s, str):
+        return (s or "").strip()
+    return s.replace("\\", "").replace('"', "'").strip()
+
+
 def run_full_pipeline_background(search_term: Union[str, List[str]]):
     """
     Background task to run the complete items pipeline.
@@ -50,7 +57,7 @@ async def search_items(request: SearchRequest, background_tasks: BackgroundTasks
     try:
         if request.genai and request.user_input:
             # GenAI: generate terms, run pipeline with list, return terms for Results pills
-            raw = (request.user_input or "").strip()
+            raw = _sanitize_search_input(request.user_input or "")
             if not raw:
                 raise HTTPException(status_code=400, detail="user_input required for GenAI search")
             num_terms = max(1, min(10, request.num_terms))
@@ -81,9 +88,9 @@ async def search_items(request: SearchRequest, background_tasks: BackgroundTasks
                 search_terms=search_terms,
             )
         # Regular search
-        if not request.search_term or not request.search_term.strip():
+        st = _sanitize_search_input(request.search_term or "")
+        if not st:
             raise HTTPException(status_code=400, detail="search_term required for regular search")
-        st = request.search_term.strip()
         items, _, _ = recommendation_service.get_recommendations(
             search_term=st,
             user_id=request.user_id
@@ -122,18 +129,35 @@ async def get_results(
     """
     try:
         if search_terms and len(search_terms) > 0:
+            search_terms = [_sanitize_search_input(t) for t in search_terms if t]
+            search_terms = [t for t in search_terms if t]
+            if not search_terms:
+                raise HTTPException(status_code=400, detail="search_terms required")
             items, coefficients, constant = recommendation_service.get_recommendations(
                 search_terms=search_terms,
                 user_id=user_id
             )
+            if len(items) == 0 and len(search_terms) > 0:
+                items, coefficients, constant = recommendation_service.get_recommendations(
+                    search_term=search_terms[0],
+                    user_id=user_id
+                )
+                logger.info("GET /results search_terms=%s -> 0 items; fallback search_term=%s -> %s items",
+                            search_terms, search_terms[0], len(items))
+            else:
+                logger.info("GET /results search_terms=%s -> %s items", search_terms, len(items))
             primary = search_terms[0]
         else:
             if not search_term:
                 raise HTTPException(status_code=400, detail="search_term or search_terms required")
+            search_term = _sanitize_search_input(search_term)
+            if not search_term:
+                raise HTTPException(status_code=400, detail="search_term required")
             items, coefficients, constant = recommendation_service.get_recommendations(
                 search_term=search_term,
                 user_id=user_id
             )
+            logger.info("GET /results search_term=%s -> %s items", search_term, len(items))
             primary = search_term
 
         product_items = [ProductItem(**item) for item in items]

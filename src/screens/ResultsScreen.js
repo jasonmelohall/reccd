@@ -70,7 +70,7 @@ const ResultsScreen = ({ route }) => {
 
       const newItems = data?.items || [];
 
-      // Always update items from API so pipeline completion shows (same cadence as regular search)
+      if (isPolling) pollFailuresRef.current = 0;
       setItems(newItems);
       if (newItems.length > 0) {
         setLastUpdated(new Date());
@@ -81,6 +81,12 @@ const ResultsScreen = ({ route }) => {
     } catch (err) {
       if (!isPolling) {
         setError(err.message);
+      } else {
+        pollFailuresRef.current = (pollFailuresRef.current || 0) + 1;
+        if (pollFailuresRef.current >= POLL_FAILURES_BEFORE_ERROR) {
+          setError('Couldn\'t load results. Pull to refresh.');
+          setPolling(false);
+        }
       }
     } finally {
       if (!isPolling) {
@@ -91,6 +97,8 @@ const ResultsScreen = ({ route }) => {
 
   const fetchResultsRef = useRef(fetchResults);
   fetchResultsRef.current = fetchResults;
+  const pollFailuresRef = useRef(0);
+  const POLL_FAILURES_BEFORE_ERROR = 2;
 
   useEffect(() => {
     if (isGenAI && searchTerms?.length) {
