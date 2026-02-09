@@ -172,28 +172,16 @@ const ResultsScreen = ({ route }) => {
     }
   };
 
-  const handleOpenProduct = async (item) => {
-    if (!item) {
-      return;
-    }
+  const handleOpenProduct = (item) => {
+    if (!item) return;
     const url = item.link || item.product_url;
-    if (!url) {
-      return;
-    }
-    await logClick(item);
+    if (!url) return;
     if (Platform.OS === 'web') {
       window.open(url, '_blank', 'noopener,noreferrer');
     } else {
       Linking.openURL(url).catch(() => {});
     }
-  };
-
-  const handleCardMouseDown = (e, item) => {
-    if (Platform.OS === 'web' && e.nativeEvent.button === 1) {
-      e.preventDefault();
-      e.stopPropagation();
-      handleOpenProduct(item);
-    }
+    logClick(item);
   };
 
   // One search_term per row; API sends search_terms as [that term] for compatibility
@@ -209,48 +197,64 @@ const ResultsScreen = ({ route }) => {
       })
     : items;
 
-  const renderItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.card}
-      onPress={() => handleOpenProduct(item)}
-      onMouseDown={Platform.OS === 'web' ? (e) => handleCardMouseDown(e, item) : undefined}
-    >
-      <View style={styles.cardContent}>
-        {item.image_url && (
-          <Image
-            source={{ uri: item.image_url }}
-            style={styles.productImage}
-            resizeMode="contain"
-          />
+  const cardContent = (item) => (
+    <View style={styles.cardContent}>
+      {item.image_url && (
+        <Image
+          source={{ uri: item.image_url }}
+          style={styles.productImage}
+          resizeMode="contain"
+        />
+      )}
+      <View style={styles.cardText}>
+        <Text style={styles.cardTitle} numberOfLines={2}>{item.title || 'No title'}</Text>
+        {isGenAI && itemTerms(item).length > 0 && (
+          <View style={styles.badgeRow}>
+            {itemTerms(item).map((t) => (
+              <View key={t} style={styles.badge}>
+                <Text style={styles.badgeText} numberOfLines={1}>{t}</Text>
+              </View>
+            ))}
+          </View>
         )}
-        <View style={styles.cardText}>
-          <Text style={styles.cardTitle} numberOfLines={2}>{item.title || 'No title'}</Text>
-          {isGenAI && itemTerms(item).length > 0 && (
-            <View style={styles.badgeRow}>
-              {itemTerms(item).map((t) => (
-                <View key={t} style={styles.badge}>
-                  <Text style={styles.badgeText} numberOfLines={1}>{t}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-          <Text style={styles.price}>${item.price?.toFixed?.(2) ?? '—'}</Text>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Rating: {item.rating?.toFixed?.(1) ?? '—'}</Text>
-            <Text style={styles.metaText}>Reviews: {item.ratings_total ?? '—'}</Text>
-          </View>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Score: {item.reccd_score?.toFixed?.(2) ?? '—'}</Text>
-            <Text style={styles.metaText}>Rank: {item.search_rank ?? '—'}</Text>
-          </View>
-          <View style={styles.metaRow}>
-            <Text style={styles.metaText}>Frequency: {item.frequency?.toFixed?.(2) ?? '—'}</Text>
-            <Text style={styles.metaText}>Release: {item.release_date ?? '—'}</Text>
-          </View>
+        <Text style={styles.price}>${item.price?.toFixed?.(2) ?? '—'}</Text>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaText}>Rating: {item.rating?.toFixed?.(1) ?? '—'}</Text>
+          <Text style={styles.metaText}>Reviews: {item.ratings_total ?? '—'}</Text>
+        </View>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaText}>Score: {item.reccd_score?.toFixed?.(2) ?? '—'}</Text>
+          <Text style={styles.metaText}>Rank: {item.search_rank ?? '—'}</Text>
+        </View>
+        <View style={styles.metaRow}>
+          <Text style={styles.metaText}>Frequency: {item.frequency?.toFixed?.(2) ?? '—'}</Text>
+          <Text style={styles.metaText}>Release: {item.release_date ?? '—'}</Text>
         </View>
       </View>
-    </TouchableOpacity>
+    </View>
   );
+
+  const renderItem = ({ item }) => {
+    const url = item.link || item.product_url;
+    if (Platform.OS === 'web' && url) {
+      return (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={styles.cardLink}
+          onClick={() => logClick(item)}
+        >
+          <View style={styles.card}>{cardContent(item)}</View>
+        </a>
+      );
+    }
+    return (
+      <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item)}>
+        {cardContent(item)}
+      </TouchableOpacity>
+    );
+  };
 
   if (loading && items.length === 0) {
     return (
@@ -469,6 +473,11 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 10,
     color: '#4A5568',
+  },
+  cardLink: {
+    textDecoration: 'none',
+    color: 'inherit',
+    display: 'block',
   },
   card: {
     backgroundColor: '#fff',
