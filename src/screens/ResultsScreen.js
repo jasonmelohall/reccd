@@ -20,6 +20,14 @@ const API_BASE_URL =
   Constants?.manifest?.extra?.apiBaseUrl ??
   'https://reccd-web-service.onrender.com';
 
+const PIPELINE_STATUS_MESSAGES = [
+  'Searching Amazon…',
+  'Gathering product data…',
+  'Fetching prices & ratings…',
+  'Running rankings…',
+  'Almost there—updating every 10 sec…',
+];
+
 const ResultsScreen = ({ route }) => {
   const { searchTerm, searchTerms, userId = 1 } = route.params || {};
   const [items, setItems] = useState([]);
@@ -27,10 +35,14 @@ const ResultsScreen = ({ route }) => {
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
   const [polling, setPolling] = useState(false);
+  const [pipelineStatusIndex, setPipelineStatusIndex] = useState(0);
   const isGenAI = searchTerms && searchTerms.length > 0;
   const [selectedPills, setSelectedPills] = useState(() =>
     isGenAI ? searchTerms.reduce((acc, t) => ({ ...acc, [t]: true }), {}) : {}
   );
+
+  const pipelineInProgress = items.length === 0 && polling;
+  const showEmptyState = items.length === 0 && !loading && !polling;
 
   const fetchResults = useCallback(async (isPolling = false) => {
     const hasTerm = searchTerm || (searchTerms && searchTerms.length > 0);
@@ -87,6 +99,15 @@ const ResultsScreen = ({ route }) => {
   useEffect(() => {
     fetchResults(false);
   }, [searchTerm, searchTerms, userId]);
+
+  // Rotate pipeline status message every 12s when waiting for results
+  useEffect(() => {
+    if (!pipelineInProgress) return;
+    const interval = setInterval(() => {
+      setPipelineStatusIndex((i) => (i + 1) % PIPELINE_STATUS_MESSAGES.length);
+    }, 12000);
+    return () => clearInterval(interval);
+  }, [pipelineInProgress]);
 
   // Auto-refresh polling after initial load (pipeline takes ~2-3 minutes)
   useEffect(() => {
@@ -150,17 +171,24 @@ const ResultsScreen = ({ route }) => {
     if (!item) {
       return;
     }
-    
     const url = item.link || item.product_url;
     if (!url) {
       return;
     }
-    
-    // Log the click event (same as purchase logging)
     await logClick(item);
-    
-    // Open the product URL
-    Linking.openURL(url).catch(() => {});
+    if (Platform.OS === 'web') {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } else {
+      Linking.openURL(url).catch(() => {});
+    }
+  };
+
+  const handleCardMouseDown = (e, item) => {
+    if (Platform.OS === 'web' && e.nativeEvent.button === 1) {
+      e.preventDefault();
+      e.stopPropagation();
+      handleOpenProduct(item);
+    }
   };
 
   // One search_term per row; API sends search_terms as [that term] for compatibility
@@ -177,7 +205,11 @@ const ResultsScreen = ({ route }) => {
     : items;
 
   const renderItem = ({ item }) => (
-    <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item)}>
+    <TouchableOpacity
+      style={styles.card}
+      onPress={() => handleOpenProduct(item)}
+      onMouseDown={Platform.OS === 'web' ? (e) => handleCardMouseDown(e, item) : undefined}
+    >
       <View style={styles.cardContent}>
         {item.image_url && (
           <Image
@@ -215,11 +247,12 @@ const ResultsScreen = ({ route }) => {
     </TouchableOpacity>
   );
 
-  if (loading) {
+  if (loading && items.length === 0) {
     return (
       <SafeAreaView style={styles.centered}>
         <ActivityIndicator size="large" color="#FF9900" />
-        <Text style={styles.statusText}>Loading latest rankings…</Text>
+        <Text style={styles.statusText}>Loading…</Text>
+        <Text style={styles.statusSubtext}>We'll update every 10 seconds.</Text>
       </SafeAreaView>
     );
   }
@@ -281,7 +314,19 @@ const ResultsScreen = ({ route }) => {
         >
           <ListHeader />
           {visibleItems.length === 0 ? (
-            <Text style={styles.empty}>No results yet. Pull to refresh.</Text>
+            <View style={styles.emptyContainer}>
+              {pipelineInProgress ? (
+                <>
+                  <ActivityIndicator size="small" color="#FF9900" style={{ marginBottom: 8 }} />
+                  <Text style={styles.pipelineStatus}>
+                    {PIPELINE_STATUS_MESSAGES[pipelineStatusIndex]}
+                  </Text>
+                  <Text style={styles.emptySubtext}>Updating every 10 seconds. Pull to refresh.</Text>
+                </>
+              ) : showEmptyState ? (
+                <Text style={styles.empty}>No results yet. Pull to refresh.</Text>
+              ) : null}
+            </View>
           ) : (
             visibleItems.map((item, index) => (
               <View key={`${item.asin || index}`}>
@@ -306,7 +351,21 @@ const ResultsScreen = ({ route }) => {
         refreshControl={
           <RefreshControl refreshing={loading} onRefresh={() => fetchResults(false)} />
         }
-        ListEmptyComponent={<Text style={styles.empty}>No results yet. Pull to refresh.</Text>}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            {pipelineInProgress ? (
+              <>
+                <ActivityIndicator size="small" color="#FF9900" style={{ marginBottom: 8 }} />
+                <Text style={styles.pipelineStatus}>
+                  {PIPELINE_STATUS_MESSAGES[pipelineStatusIndex]}
+                </Text>
+                <Text style={styles.emptySubtext}>Updating every 10 seconds. Pull to refresh.</Text>
+              </>
+            ) : showEmptyState ? (
+              <Text style={styles.empty}>No results yet. Pull to refresh.</Text>
+            ) : null}
+          </View>
+        }
         showsVerticalScrollIndicator={true}
         scrollEnabled={true}
         keyboardShouldPersistTaps="handled"
@@ -449,10 +508,31 @@ const styles = StyleSheet.create({
     marginTop: 12,
     color: '#4A5568',
   },
+  statusSubtext: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#718096',
+  },
+  emptyContainer: {
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  pipelineStatus: {
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#2D3748',
+    fontWeight: '500',
+  },
+  emptySubtext: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#718096',
+    textAlign: 'center',
+  },
   empty: {
     textAlign: 'center',
     color: '#4A5568',
-    marginTop: 40,
   },
   error: {
     color: '#E53E3E',
