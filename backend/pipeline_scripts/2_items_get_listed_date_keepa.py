@@ -129,7 +129,7 @@ total_updated = 0
 for term in SEARCH_TERMS:
     logger.info(f"=== Processing search term: {term} ===")
 
-    # Match pipe-separated or single search_term (whole-segment match)
+    # Match items by exact search_term (one term per row)
     select_query = text("""
         SELECT asin, release_date, ratings_total
         FROM items
@@ -140,10 +140,7 @@ for term in SEARCH_TERMS:
                 OR listed_last_update < NOW() - INTERVAL 7 DAY
             )
         )
-        AND (
-            search_term = :term
-            OR CONCAT('|', COALESCE(search_term, ''), '|') LIKE CONCAT('%|', :term, '|%')
-        )
+        AND search_term = :term
         ORDER BY rating DESC
         LIMIT :limit
     """)

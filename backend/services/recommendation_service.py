@@ -14,12 +14,6 @@ from config import get_settings
 logger = logging.getLogger(__name__)
 
 
-def _search_terms_list(stored: Optional[str]) -> List[str]:
-    """Split stored search_term (pipe-separated or single) into list for API."""
-    if not stored or not isinstance(stored, str):
-        return []
-    parts = [p.strip() for p in stored.split("|") if p.strip()]
-    return parts if parts else [stored]
 settings = get_settings()
 
 
@@ -136,21 +130,15 @@ class RecommendationService:
         coefficients, constant = self.load_user_coefficients()
 
         if use_multi:
-            # Match rows where stored search_term (pipe-separated or single) contains any term
-            # Use CONCAT('|', search_term, '|') LIKE '%|term|%' to avoid substring false positives
-            conditions = []
+            # One search_term per row (the term that returned this result). Match any of the GenAI terms.
+            placeholders = ", ".join([f":term_{i}" for i in range(len(search_terms))])
             params = {"user_id": user_id}
             for i, term in enumerate(search_terms):
-                key = f"term_{i}"
-                params[key] = term
-                conditions.append(
-                    "CONCAT('|', COALESCE(i.search_term, ''), '|') LIKE CONCAT('%|', :" + key + ", '|%')"
-                )
-            where_clause = " OR ".join(conditions)
-            query_str = """
+                params[f"term_{i}"] = term
+            query_str = f"""
                 SELECT *
                 FROM items i
-                WHERE (""" + where_clause + """)
+                WHERE i.search_term IN ({placeholders})
                 AND NOT EXISTS (
                     SELECT 1
                     FROM items_user u
@@ -279,10 +267,11 @@ class RecommendationService:
         # Replace NaN and inf values with None for JSON serialization
         df = df.replace([np.nan, np.inf, -np.inf], None)
         
-        # Convert to list of dicts and add search_terms (split pipe-separated) for frontend
+        # Convert to list of dicts; each row has one search_term, expose as search_terms list for API
         items = df.to_dict('records')
         for item in items:
-            item['search_terms'] = _search_terms_list(item.get('search_term'))
+            st = item.get('search_term')
+            item['search_terms'] = [st] if st else []
 
         return items, coefficients, constant
 

@@ -72,14 +72,11 @@ if __name__ == "__main__":
     for term in SEARCH_TERMS:
         logging.info(f"=== Processing search term: {term} ===")
 
-        # Match pipe-separated or single search_term (whole-segment match)
+        # Match items by exact search_term (one term per row)
         result = conn.execute(text("""
             SELECT asin, ratings_total FROM items
             WHERE release_date IS NULL
-            AND (
-                search_term = :term
-                OR CONCAT('|', COALESCE(search_term, ''), '|') LIKE CONCAT('%|', :term, '|%')
-            )
+            AND search_term = :term
         """), {"term": term}).fetchall()
 
         asin_data = [(row[0], row[1]) for row in result]

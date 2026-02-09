@@ -55,24 +55,14 @@ const ResultsScreen = ({ route }) => {
       }
 
       const newItems = data?.items || [];
-      
-      // Always update items when we get new results
-      // During polling, always update to catch pipeline completion even if count stays same
+
+      // Always update items from API so pipeline completion shows (same cadence as regular search)
+      setItems(newItems);
       if (newItems.length > 0) {
-        setItems((prevItems) => {
-          const countChanged = newItems.length !== prevItems.length;
-          
-          // Update if count changed, or during polling (to catch any updates from pipeline)
-          if (countChanged || isPolling) {
-            setLastUpdated(new Date());
-            // Stop polling once we have substantial results (pipeline likely complete)
-            if (isPolling && newItems.length >= 10) {
-              setPolling(false);
-            }
-            return newItems;
-          }
-          return prevItems;
-        });
+        setLastUpdated(new Date());
+        if (isPolling && newItems.length >= 10) {
+          setPolling(false);
+        }
       }
     } catch (err) {
       if (!isPolling) {
@@ -173,9 +163,17 @@ const ResultsScreen = ({ route }) => {
     Linking.openURL(url).catch(() => {});
   };
 
-  const itemTerms = (item) => (item.search_terms && item.search_terms.length > 0 ? item.search_terms : (item.search_term ? [item.search_term] : []));
+  // One search_term per row; API sends search_terms as [that term] for compatibility
+  const itemTerms = (item) =>
+    (item.search_terms && item.search_terms.length > 0)
+      ? item.search_terms
+      : (item.search_term ? [item.search_term] : []);
+  // GenAI: show item if it has no terms (show all) or its term is selected in pills
   const visibleItems = isGenAI && Object.keys(selectedPills).length > 0
-    ? items.filter((item) => itemTerms(item).some((t) => selectedPills[t]))
+    ? items.filter((item) => {
+        const terms = itemTerms(item);
+        return terms.length === 0 || terms.some((t) => selectedPills[t]);
+      })
     : items;
 
   const renderItem = ({ item }) => (
