@@ -8,7 +8,7 @@ import datetime
 import logging
 from typing import List, Optional
 
-from database import get_db_connection, engine
+from database import get_db_connection
 from config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -165,7 +165,9 @@ class RecommendationService:
             else:
                 search_pattern = search_term
 
-            query = text("""
+            # Avoid pd.read_sql entirely: execute with connection and build DataFrame from rows.
+            # This sidesteps "Query must be a string unless using sqlalchemy" across pandas/sqlalchemy versions.
+            query_str = """
                 SELECT *
                 FROM items i
                 WHERE i.search_term LIKE :search_term
@@ -177,12 +179,14 @@ class RecommendationService:
                     AND u.is_relevant = 0
                     AND u.search_term = i.search_term
                 )
-            """)
-            # Use engine (not conn) so pandas accepts SQLAlchemy text() object
-            df = pd.read_sql(query, engine, params={
-                "search_term": search_pattern,
-                "user_id": user_id
-            })
+            """
+            with get_db_connection() as conn:
+                result = conn.execute(text(query_str), params={
+                    "search_term": search_pattern,
+                    "user_id": user_id,
+                })
+                rows = result.fetchall()
+                df = pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
 
         if len(df) == 0:
             logger.info("No items found for search (term=%s, terms=%s)", search_term, search_terms)

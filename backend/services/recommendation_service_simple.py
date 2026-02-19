@@ -29,7 +29,7 @@ class SimpleRecommendationService:
         """
         search_pattern = f"%{search_term}%"
         
-        query = text("""
+        query_str = """
             SELECT 
                 asin,
                 parent_asin,
@@ -47,13 +47,11 @@ class SimpleRecommendationService:
             AND title IS NOT NULL
             ORDER BY (rating * COALESCE(ratings_total, 0)) DESC
             LIMIT :limit
-        """)
-        
-        # Use engine (not conn) so pandas accepts SQLAlchemy text() object
-        df = pd.read_sql(query, engine, params={
-            "search_term": search_pattern,
-            "limit": limit
-        })
+        """
+        df = pd.read_sql(
+            query_str, engine,
+            params={"search_term": search_pattern, "limit": limit},
+        )
         
         if len(df) == 0:
             logger.info(f"No items found for search term: {search_term}")
