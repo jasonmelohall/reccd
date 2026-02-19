@@ -149,7 +149,8 @@ class RecommendationService:
                 )
             """
             with get_db_connection() as conn:
-                result = conn.execute(text(query_str), params)
+                stmt = text(query_str).bindparams(**params)
+                result = conn.execute(stmt)
                 rows = result.fetchall()
                 if not rows:
                     df = pd.DataFrame()
@@ -182,10 +183,11 @@ class RecommendationService:
                 )
             """
             with get_db_connection() as conn:
-                result = conn.execute(text(query_str), {
-                    "search_term": search_pattern,
-                    "user_id": user_id,
-                })
+                stmt = text(query_str).bindparams(
+                    search_term=search_pattern,
+                    user_id=user_id,
+                )
+                result = conn.execute(stmt)
                 rows = result.fetchall()
                 df = pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
 
