@@ -1,0 +1,4 @@
+# Track only reccd-app; ignore everything else at repo root
+/*
+!.gitignore
+!/reccd-app
