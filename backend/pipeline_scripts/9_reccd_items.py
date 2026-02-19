@@ -191,7 +191,7 @@ try:
     # Join all exclude conditions with AND
     exclude_clause = " AND ".join(exclude_conditions) if exclude_conditions else "1=1"
     
-    query = text(f"""
+    query_str = f"""
         SELECT *
         FROM items i
         WHERE ({like_clause})
@@ -204,9 +204,10 @@ try:
             AND u.is_relevant = 0
             AND u.search_term = i.search_term
         )
-    """)
-
-    df = pd.read_sql(query, conn, params=params)
+    """
+    result = conn.execute(text(query_str), params)
+    rows = result.fetchall()
+    df = pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
 
     # ✅ Ensure date columns are properly converted and release_date is min of all 3
     df['listed_date'] = pd.to_datetime(df['listed_date'], errors='coerce')

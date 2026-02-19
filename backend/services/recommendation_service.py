@@ -156,6 +156,7 @@ class RecommendationService:
                 else:
                     df = pd.DataFrame(rows, columns=result.keys())
         else:
+            logger.info("get_recommendations: single-term path (execute+DataFrame, no pd.read_sql)")
             if wildcard_mode == 'both_ends':
                 search_pattern = f"%{search_term}%"
             elif wildcard_mode == 'start_only':
