@@ -10,7 +10,7 @@ then this API just returns what's already in the database.
 import pandas as pd
 import numpy as np
 from sqlalchemy import text
-from database import get_db_connection
+from database import get_db_connection, engine
 from config import get_settings
 import logging
 
@@ -49,11 +49,11 @@ class SimpleRecommendationService:
             LIMIT :limit
         """)
         
-        with get_db_connection() as conn:
-            df = pd.read_sql(query, conn, params={
-                "search_term": search_pattern,
-                "limit": limit
-            })
+        # Use engine (not conn) so pandas accepts SQLAlchemy text() object
+        df = pd.read_sql(query, engine, params={
+            "search_term": search_pattern,
+            "limit": limit
+        })
         
         if len(df) == 0:
             logger.info(f"No items found for search term: {search_term}")
