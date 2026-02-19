@@ -182,7 +182,7 @@ class RecommendationService:
                 )
             """
             with get_db_connection() as conn:
-                result = conn.execute(text(query_str), params={
+                result = conn.execute(text(query_str), {
                     "search_term": search_pattern,
                     "user_id": user_id,
                 })
