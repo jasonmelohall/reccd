@@ -199,77 +199,75 @@ async def log_click(event: ClickEventRequest):
         now = datetime.datetime.utcnow()
 
         with get_db_connection() as conn:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO items_user (
-                        user_id,
-                        asin,
-                        parent_asin,
-                        title,
-                        price,
-                        rating,
-                        ratings_total,
-                        frequency,
-                        search_rank,
-                        release_date,
-                        reccd_score,
-                        price_percentile,
-                        rating_percentile,
-                        release_date_percentile,
-                        frequency_percentile,
-                        search_rank_percentile,
-                        purchase_datetime,
-                        search_term,
-                        is_relevant,
-                        event_type
-                    )
-                    VALUES (
-                        :user_id,
-                        :asin,
-                        :parent_asin,
-                        :title,
-                        :price,
-                        :rating,
-                        :ratings_total,
-                        :frequency,
-                        :search_rank,
-                        :release_date,
-                        :reccd_score,
-                        :price_percentile,
-                        :rating_percentile,
-                        :release_date_percentile,
-                        :frequency_percentile,
-                        :search_rank_percentile,
-                        :purchase_datetime,
-                        :search_term,
-                        :is_relevant,
-                        'click'
-                    )
-                    """
-                ),
-                {
-                    "user_id": event.user_id,
-                    "asin": event.asin,
-                    "parent_asin": event.parent_asin,
-                    "title": event.title,
-                    "price": event.price,
-                    "rating": event.rating,
-                    "ratings_total": event.ratings_total,
-                    "frequency": event.frequency,
-                    "search_rank": event.search_rank,
-                    "release_date": release_date_dt,
-                    "reccd_score": event.reccd_score,
-                    "price_percentile": event.price_percentile,
-                    "rating_percentile": event.rating_percentile,
-                    "release_date_percentile": event.release_date_percentile,
-                    "frequency_percentile": event.frequency_percentile,
-                    "search_rank_percentile": event.search_rank_percentile,
-                    "purchase_datetime": now,
-                    "search_term": event.search_term,
-                    "is_relevant": event.is_relevant,
-                },
+            stmt = text(
+                """
+                INSERT INTO items_user (
+                    user_id,
+                    asin,
+                    parent_asin,
+                    title,
+                    price,
+                    rating,
+                    ratings_total,
+                    frequency,
+                    search_rank,
+                    release_date,
+                    reccd_score,
+                    price_percentile,
+                    rating_percentile,
+                    release_date_percentile,
+                    frequency_percentile,
+                    search_rank_percentile,
+                    purchase_datetime,
+                    search_term,
+                    is_relevant,
+                    event_type
+                )
+                VALUES (
+                    :user_id,
+                    :asin,
+                    :parent_asin,
+                    :title,
+                    :price,
+                    :rating,
+                    :ratings_total,
+                    :frequency,
+                    :search_rank,
+                    :release_date,
+                    :reccd_score,
+                    :price_percentile,
+                    :rating_percentile,
+                    :release_date_percentile,
+                    :frequency_percentile,
+                    :search_rank_percentile,
+                    :purchase_datetime,
+                    :search_term,
+                    :is_relevant,
+                    'click'
+                )
+                """
+            ).bindparams(
+                user_id=event.user_id,
+                asin=event.asin,
+                parent_asin=event.parent_asin,
+                title=event.title,
+                price=event.price,
+                rating=event.rating,
+                ratings_total=event.ratings_total,
+                frequency=event.frequency,
+                search_rank=event.search_rank,
+                release_date=release_date_dt,
+                reccd_score=event.reccd_score,
+                price_percentile=event.price_percentile,
+                rating_percentile=event.rating_percentile,
+                release_date_percentile=event.release_date_percentile,
+                frequency_percentile=event.frequency_percentile,
+                search_rank_percentile=event.search_rank_percentile,
+                purchase_datetime=now,
+                search_term=event.search_term,
+                is_relevant=event.is_relevant,
             )
+            conn.execute(stmt)
             conn.commit()
 
         return {"status": "ok"}
