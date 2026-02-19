@@ -19,7 +19,7 @@ const API_BASE_URL =
 const DEFAULT_USER_ID = 1;
 
 const SearchScreen = ({ navigation }) => {
-  const [searchMode, setSearchMode] = useState('regular'); // 'regular' | 'genai'
+  const [searchMode, setSearchMode] = useState('genai'); // 'regular' | 'genai'
   const [searchTerm, setSearchTerm] = useState('');
   const [userInput, setUserInput] = useState('');
   const [numTerms, setNumTerms] = useState(3);

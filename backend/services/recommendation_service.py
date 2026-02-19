@@ -8,7 +8,7 @@ import datetime
 import logging
 from typing import List, Optional
 
-from database import get_db_connection
+from database import get_db_connection, engine
 from config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -178,11 +178,11 @@ class RecommendationService:
                     AND u.search_term = i.search_term
                 )
             """)
-            with get_db_connection() as conn:
-                df = pd.read_sql(query, conn, params={
-                    "search_term": search_pattern,
-                    "user_id": user_id
-                })
+            # Use engine (not conn) so pandas accepts SQLAlchemy text() object
+            df = pd.read_sql(query, engine, params={
+                "search_term": search_pattern,
+                "user_id": user_id
+            })
 
         if len(df) == 0:
             logger.info("No items found for search (term=%s, terms=%s)", search_term, search_terms)
