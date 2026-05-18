@@ -264,19 +264,21 @@ const ResultsScreen = ({ route }) => {
     const url = item.link || item.product_url;
     if (Platform.OS === 'web' && url) {
       return (
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={styles.cardLink}
-          onClick={() => logClick(item)}
-        >
-          <View style={styles.card}>{cardContent(item)}</View>
-        </a>
+        <View style={styles.cardOuter}>
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={styles.cardLink}
+            onClick={() => logClick(item)}
+          >
+            <View style={styles.card}>{cardContent(item)}</View>
+          </a>
+        </View>
       );
     }
     return (
-      <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item)}>
+      <TouchableOpacity style={styles.card} onPress={() => handleOpenProduct(item)} activeOpacity={0.85}>
         {cardContent(item)}
       </TouchableOpacity>
     );
@@ -425,6 +427,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 8,
     backgroundColor: '#F7FAFC',
+    width: '100%',
   },
   list: {
     flex: 1,
@@ -500,24 +503,27 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#4A5568',
   },
+  cardOuter: {
+    width: '100%',
+    maxWidth: 720,
+    marginBottom: 12,
+    alignSelf: 'center',
+  },
   cardLink: {
     textDecoration: 'none',
     color: 'inherit',
     display: 'block',
+    width: '100%',
   },
   card: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 16,
-    marginBottom: 12,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 10,
     elevation: 2,
-    ...(Platform.OS === 'web'
-      ? { maxWidth: 720, alignSelf: 'center', width: '100%' }
-      : {}),
   },
   cardContent: {
     flexDirection: 'row',
