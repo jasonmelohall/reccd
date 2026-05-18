@@ -28,6 +28,19 @@ const PIPELINE_STATUS_MESSAGES = [
   'Almost there—updating every 10 sec…',
 ];
 
+const formatMoney = (value) => {
+  if (value == null || Number.isNaN(Number(value))) return '—';
+  return `$${Number(value).toFixed(2)}`;
+};
+
+const displayPricePerItem = (item) => {
+  if (item.price_per_item != null) return formatMoney(item.price_per_item);
+  if (item.item_count > 1 && item.price != null) {
+    return formatMoney(item.price / item.item_count);
+  }
+  return formatMoney(item.price);
+};
+
 const ResultsScreen = ({ route }) => {
   const { searchTerm, searchTerms, userId = 1 } = route.params || {};
   const [items, setItems] = useState([]);
@@ -159,6 +172,8 @@ const ResultsScreen = ({ route }) => {
           parent_asin: item.parent_asin || null,
           title: item.title || null,
           price: item.price || null,
+          item_count: item.item_count || null,
+          price_per_item: item.price_per_item || null,
           rating: item.rating || null,
           ratings_total: item.ratings_total || null,
           frequency: item.frequency || null,
@@ -166,6 +181,7 @@ const ResultsScreen = ({ route }) => {
           release_date: item.release_date || null,
           reccd_score: item.reccd_score || null,
           price_percentile: item.price_percentile || null,
+          item_count_percentile: item.item_count_percentile || null,
           rating_percentile: item.rating_percentile || null,
           release_date_percentile: item.release_date_percentile || null,
           frequency_percentile: item.frequency_percentile || null,
@@ -225,18 +241,20 @@ const ResultsScreen = ({ route }) => {
             ))}
           </View>
         )}
-        <Text style={styles.price}>${item.price?.toFixed?.(2) ?? '—'}</Text>
+        <Text style={styles.price}>Price: {formatMoney(item.price)}</Text>
         <View style={styles.metaRow}>
-          <Text style={styles.metaText}>Rating: {item.rating?.toFixed?.(1) ?? '—'}</Text>
-          <Text style={styles.metaText}>Reviews: {item.ratings_total ?? '—'}</Text>
+          <Text style={styles.metaItem}>Rating: {item.rating?.toFixed?.(1) ?? '—'}</Text>
+          <Text style={styles.metaItem}>Reviews: {item.ratings_total ?? '—'}</Text>
         </View>
         <View style={styles.metaRow}>
-          <Text style={styles.metaText}>Score: {item.reccd_score?.toFixed?.(2) ?? '—'}</Text>
-          <Text style={styles.metaText}>Rank: {item.search_rank ?? '—'}</Text>
+          <Text style={styles.metaItem}>Price per item: {displayPricePerItem(item)}</Text>
+          <Text style={styles.metaItem}>
+            Reccd Score: {item.reccd_score?.toFixed?.(2) ?? '—'}
+          </Text>
         </View>
         <View style={styles.metaRow}>
-          <Text style={styles.metaText}>Frequency: {item.frequency?.toFixed?.(2) ?? '—'}</Text>
-          <Text style={styles.metaText}>Release: {item.release_date ?? '—'}</Text>
+          <Text style={styles.metaItem}>Frequency: {item.frequency?.toFixed?.(2) ?? '—'}</Text>
+          <Text style={styles.metaItem}>Release: {item.release_date ?? '—'}</Text>
         </View>
       </View>
     </View>
@@ -497,6 +515,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowRadius: 10,
     elevation: 2,
+    ...(Platform.OS === 'web'
+      ? { maxWidth: 720, alignSelf: 'center', width: '100%' }
+      : {}),
   },
   cardContent: {
     flexDirection: 'row',
@@ -525,12 +546,19 @@ const styles = StyleSheet.create({
   },
   metaRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
+    columnGap: 24,
+    rowGap: 4,
     marginBottom: 4,
   },
-  metaText: {
+  metaItem: {
     fontSize: 13,
     color: '#4A5568',
+    minWidth: 150,
+    maxWidth: 220,
+    flexShrink: 0,
   },
   statusText: {
     marginTop: 12,
