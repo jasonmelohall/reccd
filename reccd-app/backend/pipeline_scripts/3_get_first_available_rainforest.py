@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import json
 import os
 import sys
 import requests
@@ -57,13 +58,16 @@ def fetch_product_dates(asin):
             title = product_data.get('title')
             price = product_data.get('buybox_winner', {}).get('price', {}).get('value') if product_data.get('buybox_winner') else None
             rating = product_data.get('rating')
-            return parent_asin, first_available, oldest_review, ratings_total, title, price, rating
+            buybox = product_data.get('buybox_winner') or {}
+            unit_price = buybox.get('unit_price')
+            unit_json = json.dumps(unit_price) if unit_price is not None else None
+            return parent_asin, first_available, oldest_review, ratings_total, title, price, rating, unit_json
         else:
             logging.error(f"Error fetching {asin}: {response.status_code} - {response.text}")
-            return None, None, None, None, None, None, None
+            return None, None, None, None, None, None, None, None
     except Exception as e:
         logging.error(f"Exception fetching {asin}: {e}")
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, None
 
 if __name__ == "__main__":
     total_success = 0
@@ -86,7 +90,7 @@ if __name__ == "__main__":
         fail_count = 0
 
         for idx, (asin, current_ratings_total) in enumerate(asin_data, start=1):
-            parent_asin, first_available_str, oldest_review_str, ratings_total, title, price, rating = fetch_product_dates(asin)
+            parent_asin, first_available_str, oldest_review_str, ratings_total, title, price, rating, unit_json = fetch_product_dates(asin)
             update_fields = {}
             
             # Store parent_asin if found
@@ -116,12 +120,19 @@ if __name__ == "__main__":
                     if rating is not None:
                         update_fields['rating'] = rating
 
+            if unit_json is not None:
+                update_fields['rainforest_unit_price_json'] = unit_json
+
             if update_fields:
                 update_fields['asin'] = asin
+                set_parts = [f"{col} = :{col}" for col in update_fields if col != 'asin']
+                if unit_json is not None:
+                    set_parts.append("rainforest_updated_at = UTC_TIMESTAMP()")
+                    set_parts.append("item_count_updated_at = NULL")
 
                 query = text(f"""
                     UPDATE items
-                    SET {', '.join([f"{col} = :{col}" for col in update_fields if col != 'asin'])}
+                    SET {', '.join(set_parts)}
                     WHERE asin = :asin
                 """)
                 conn.execute(query, update_fields)

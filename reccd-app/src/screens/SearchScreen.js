@@ -18,15 +18,6 @@ const API_BASE_URL =
 
 const DEFAULT_USER_ID = 1;
 
-// Sanitize for API: remove/escape chars that can break requests (e.g. double-quote in direct search)
-function sanitizeSearchInput(str) {
-  if (typeof str !== 'string') return '';
-  return str
-    .replace(/\\/g, '')
-    .replace(/"/g, "'")
-    .trim();
-}
-
 const SearchScreen = ({ navigation }) => {
   const [searchMode, setSearchMode] = useState('genai'); // 'regular' | 'genai'
   const [searchTerm, setSearchTerm] = useState('');
@@ -36,19 +27,14 @@ const SearchScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const SEARCH_TIMEOUT_MS = 300000; // 5 minutes
-
   const handleSearch = async () => {
     setError('');
     setStatusMessage('');
     setLoading(true);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
-
     try {
       if (searchMode === 'genai') {
-        const raw = sanitizeSearchInput(userInput || '');
+        const raw = (userInput || '').trim();
         if (!raw) {
           setError('Describe what you\'re looking for to continue.');
           setLoading(false);
@@ -64,9 +50,7 @@ const SearchScreen = ({ navigation }) => {
             num_terms: n,
             user_id: DEFAULT_USER_ID,
           }),
-          signal: controller.signal,
         });
-        clearTimeout(timeoutId);
         const data = await response.json();
         if (!response.ok) throw new Error(data?.detail || 'Request failed');
         setStatusMessage(data?.message || 'Analyzing products...');
@@ -78,7 +62,7 @@ const SearchScreen = ({ navigation }) => {
           itemsFound: data?.items_found,
         });
       } else {
-        const trimmed = sanitizeSearchInput(searchTerm);
+        const trimmed = searchTerm.trim();
         if (!trimmed) {
           setError('Enter a search term to continue.');
           setLoading(false);
@@ -91,9 +75,7 @@ const SearchScreen = ({ navigation }) => {
             search_term: trimmed,
             user_id: DEFAULT_USER_ID,
           }),
-          signal: controller.signal,
         });
-        clearTimeout(timeoutId);
         const data = await response.json();
         if (!response.ok) throw new Error(data?.detail || 'Request failed');
         setStatusMessage(data?.message || 'Analyzing products...');
@@ -105,26 +87,7 @@ const SearchScreen = ({ navigation }) => {
         });
       }
     } catch (err) {
-      clearTimeout(timeoutId);
-      if (err.name === 'AbortError') {
-        setError('Request timed out. Opening results—pull down to refresh when ready.');
-        const raw = sanitizeSearchInput(userInput || '');
-        const trimmed = sanitizeSearchInput(searchTerm);
-        if (searchMode === 'genai' && raw) {
-          navigation.navigate('Results', {
-            searchTerm: raw,
-            searchTerms: [raw],
-            userId: DEFAULT_USER_ID,
-          });
-        } else if (trimmed) {
-          navigation.navigate('Results', {
-            searchTerm: trimmed,
-            userId: DEFAULT_USER_ID,
-          });
-        }
-      } else {
-        setError(err.message || 'Request failed');
-      }
+      setError(err.message);
     } finally {
       setLoading(false);
     }

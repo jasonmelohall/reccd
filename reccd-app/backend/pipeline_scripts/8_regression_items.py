@@ -5,12 +5,10 @@ import os
 import sys
 import pandas as pd
 import numpy as np
+import statsmodels.api as sm
 from sqlalchemy import text
-from sklearn.linear_model import Ridge
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 import logging
-from datetime import datetime
 
 # Add shared directory to path for imports
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -26,6 +24,8 @@ print()
 
 # Configuration
 EMAIL = "jasonmelohall@gmail.com"  # Your email for user table lookup
+
+TARGET_COLUMN = "user_frequency"
 
 # Feature validation rules - check features in order and rerun regression after each removal
 FEATURE_VALIDATION_RULES = [
@@ -50,7 +50,7 @@ FEATURE_VALIDATION_RULES = [
         'reason': 'Release date coefficient negative - you buy older items more frequently'
     },
     {
-        'feature': 'rating_percentile', 
+        'feature': 'rating_percentile',
         'condition': 'negative',  # Remove if coefficient < 0
         'reason': 'Rating coefficient negative - you buy lower-rated items more frequently'
     }
@@ -96,34 +96,36 @@ def load_training_data():
     return df, engine
 
 def run_regression_with_features(df, feature_columns):
-    """Run Ridge regression with specified features"""
-    X = df[feature_columns].fillna(0)
-    y = df['user_frequency']
-    
-    # Scale features
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    
-    # Train Ridge Regression
-    model = Ridge(alpha=1.0)
-    model.fit(X_scaled, y)
-    
-    # Calculate performance metrics
-    y_pred = model.predict(X_scaled)
+    """OLS with intercept on raw percentiles (aligned with items/81_items_regression.py)."""
+    cols = list(dict.fromkeys(feature_columns + [TARGET_COLUMN]))
+    work = df[cols].copy()
+    if "diversity_percentile" in work.columns:
+        work["diversity_percentile"] = (
+            pd.to_numeric(work["diversity_percentile"], errors="coerce").fillna(0.0)
+        )
+    work = work.dropna(subset=feature_columns + [TARGET_COLUMN])
+    y = work[TARGET_COLUMN].astype(float)
+    X_with_const = sm.add_constant(work[feature_columns].astype(float))
+    fit = sm.OLS(y, X_with_const).fit()
+
+    y_pred = fit.fittedvalues
     mse = mean_squared_error(y, y_pred)
     rmse = np.sqrt(mse)
     mae = mean_absolute_error(y, y_pred)
-    r2 = r2_score(y, y_pred)
-    
-    # Extract coefficients
-    coefficients = dict(zip(feature_columns, model.coef_))
-    constant = model.intercept_
-    
-    return coefficients, constant, model, scaler, r2, rmse, mae
+    r2 = float(fit.rsquared)
+
+    params = fit.params
+    constant = float(params.iloc[0])
+    coefficients = {
+        feat: float(params.iloc[i])
+        for i, feat in enumerate(feature_columns, start=1)
+    }
+
+    return coefficients, constant, fit, None, r2, rmse, mae
 
 def perform_regression_analysis(df):
-    """Perform Ridge regression analysis with iterative feature validation"""
-    logger.info("Performing Ridge regression analysis with feature validation...")
+    """Perform OLS with iterative feature validation."""
+    logger.info("Performing OLS regression analysis with feature validation...")
     
     # Initial feature set
     all_features = [
@@ -139,9 +141,9 @@ def perform_regression_analysis(df):
     
     # Run initial regression
     logger.info(f"Initial regression with features: {current_features}")
-    coefficients, constant, model, scaler, r2, rmse, mae = run_regression_with_features(df, current_features)
+    coefficients, constant, model, _, r2, rmse, mae = run_regression_with_features(df, current_features)
     
-    logger.info(f"Initial Ridge Regression Performance:")
+    logger.info(f"Initial OLS regression performance:")
     logger.info(f"  R² Score: {r2:.4f}")
     logger.info(f"  RMSE: {rmse:.4f}")
     logger.info(f"  MAE: {mae:.4f}")
@@ -173,9 +175,9 @@ def perform_regression_analysis(df):
             removed_features[feature] = None
             
             # Rerun regression
-            coefficients, constant, model, scaler, r2, rmse, mae = run_regression_with_features(df, current_features)
+            coefficients, constant, model, _, r2, rmse, mae = run_regression_with_features(df, current_features)
             
-            logger.info(f"Regression Performance (without {feature}):")
+            logger.info(f"Regression performance (without {feature}):")
             logger.info(f"  R² Score: {r2:.4f}")
             logger.info(f"  RMSE: {rmse:.4f}")
             logger.info(f"  MAE: {mae:.4f}")
@@ -195,7 +197,7 @@ def perform_regression_analysis(df):
         else:
             logger.info(f"  {feature}: {coef:.6f}")
     
-    return final_coefficients, constant, model, scaler
+    return final_coefficients, constant, model, None
 
 def update_user_table(engine, coefficients, constant):
     """Update user table with learned coefficients"""
@@ -234,7 +236,7 @@ def update_user_table(engine, coefficients, constant):
 
 def print_learned_weights(coefficients, constant):
     """Print the learned weights in a table format"""
-    logger.info("Learned weights from Ridge regression (predicting user_frequency):")
+    logger.info("Learned weights from OLS regression (predicting user_frequency):")
     
     print("\n" + "="*60)
     print("LEARNED WEIGHTS (for user_frequency prediction)")
@@ -264,7 +266,7 @@ def main():
             return
         
         # Perform regression analysis
-        coefficients, constant, model, scaler = perform_regression_analysis(df)
+        coefficients, constant, model, _ = perform_regression_analysis(df)
         
         # Print learned weights
         print_learned_weights(coefficients, constant)

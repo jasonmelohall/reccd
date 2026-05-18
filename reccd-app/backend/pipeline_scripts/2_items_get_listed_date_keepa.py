@@ -14,7 +14,13 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SHARED_DIR = os.path.join(BASE_DIR, "shared")
 sys.path.insert(0, SHARED_DIR)
 
-from reccd_items import mysqlengine, get_search_term, get_parent_asin_from_keepa, get_variation_asins_from_keepa
+from reccd_items import (
+    mysqlengine,
+    get_search_term,
+    get_parent_asin_from_keepa,
+    get_variation_asins_from_keepa,
+    get_keepa_unit_fields,
+)
 
 # Setup logging
 logging.basicConfig(
@@ -67,12 +73,12 @@ def get_listed_date(asin):
                 hit_429 = True
                 logger.warning(f"429 Too Many Requests for ASIN {asin}. Sleeping {delay}s...")
                 time.sleep(delay)
-                return asin, None, None, None, None, None, hit_429, None
+                return asin, None, None, None, None, None, None, None, hit_429, None
 
             response.raise_for_status()
             data = response.json()
             if 'products' not in data or not data['products']:
-                return asin, None, None, None, None, None, False, data.get('tokensLeft')
+                return asin, None, None, None, None, None, None, None, False, data.get('tokensLeft')
 
             product = data['products'][0]
             
@@ -112,15 +118,26 @@ def get_listed_date(asin):
                 # The last entry in the ratingCount array is the most recent total
                 ratings_total = rating_count_data[-1]
 
-            logger.debug(f"{asin} → parent={parent_asin}, listed_date={listed_date}, oldest_review={oldest_review_date}, ratings_total={ratings_total}")
-            return asin, parent_asin, listed_date, oldest_review_date, rating, ratings_total, hit_429, data.get('tokensLeft')
+            keepa_units = get_keepa_unit_fields(product)
+            logger.debug(
+                "%s → parent=%s, listed_date=%s, noi=%s, pq=%s",
+                asin, parent_asin, listed_date,
+                keepa_units.get("keepa_number_of_items"),
+                keepa_units.get("keepa_package_quantity"),
+            )
+            return (
+                asin, parent_asin, listed_date, oldest_review_date, rating, ratings_total,
+                keepa_units.get("keepa_number_of_items"),
+                keepa_units.get("keepa_package_quantity"),
+                hit_429, data.get('tokensLeft'),
+            )
 
         except requests.RequestException as e:
             logger.warning(f"Request error for ASIN {asin}: {e}")
             time.sleep(delay)
 
     logger.error(f"Failed to retrieve Keepa data for ASIN {asin} after {max_retries} retries.")
-    return asin, None, None, None, None, None, False, None
+    return asin, None, None, None, None, None, None, None, False, None
 
 
 # === Main Processing ===
@@ -162,7 +179,10 @@ for term in SEARCH_TERMS:
         asin = row['asin']
         current_ratings_total = row['ratings_total']
         logger.info(f"Processing ASIN: {asin} - {index} of {len(asin_rows)}")
-        asin_val, parent_asin, listed_date, oldest_review, rating, ratings_total, hit_429, tokens_left = get_listed_date(asin)
+        (
+            asin_val, parent_asin, listed_date, oldest_review, rating, ratings_total,
+            keepa_noi, keepa_pq, hit_429, tokens_left,
+        ) = get_listed_date(asin)
 
         print(f"   • Parent ASIN       : {parent_asin if parent_asin else 'None (standalone product)'}")
         print(f"   • Listed since date : {listed_date.date() if listed_date else 'None'}")
@@ -182,10 +202,22 @@ for term in SEARCH_TERMS:
             update_fields['parent_asin'] = parent_asin
             parent_asin_clause = "parent_asin = :parent_asin,\n"
 
+        keepa_clause = ""
+        if not hit_429 and asin_val == asin:
+            update_fields['keepa_number_of_items'] = keepa_noi
+            update_fields['keepa_package_quantity'] = keepa_pq
+            keepa_clause = (
+                "keepa_number_of_items = :keepa_number_of_items,\n"
+                "keepa_package_quantity = :keepa_package_quantity,\n"
+                "keepa_updated_at = UTC_TIMESTAMP(),\n"
+                "item_count_updated_at = NULL,\n"
+            )
+
         sql = """
             UPDATE items
             SET
                 {parent_asin_clause}
+                {keepa_clause}
                 listed_date = :listed_date,
                 oldest_review = :oldest_review,
                 {rating_clause}
@@ -217,7 +249,8 @@ for term in SEARCH_TERMS:
 
         update_stmt = text(sql.format(
             parent_asin_clause=parent_asin_clause,
-            rating_clause=rating_clause, 
+            keepa_clause=keepa_clause,
+            rating_clause=rating_clause,
             ratings_total_clause=ratings_total_clause
         ))
         conn.execute(update_stmt, update_fields)

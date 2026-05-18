@@ -10,6 +10,7 @@ from config import get_settings
 from shared.reccd_items import (
     get_parent_asin_from_rainforest,
     consolidate_parent_items,
+    title_inference_fields,
 )
 
 logger = logging.getLogger(__name__)
@@ -111,12 +112,19 @@ class SearchService:
                     logger.info(f"Skipping duplicate item: {title}")
                     continue
                 
-                # Insert with parent_asin and image_url fields
+                title_fields = title_inference_fields(title)
+
                 query = text("""
-                    INSERT INTO items (asin, parent_asin, title, link, price, rating, ratings_total, 
-                                     search_term, search_rank, image_url, last_update)
-                    VALUES (:asin, :parent_asin, :title, :link, :price, :rating, :ratings_total, 
-                            :search_term, :search_rank, :image_url, :last_update)
+                    INSERT INTO items (
+                        asin, parent_asin, title, link, price, rating, ratings_total,
+                        search_term, search_rank, image_url, last_update,
+                        title_inferred_item_count, title_inferred_pattern
+                    )
+                    VALUES (
+                        :asin, :parent_asin, :title, :link, :price, :rating, :ratings_total,
+                        :search_term, :search_rank, :image_url, :last_update,
+                        :title_inferred_item_count, :title_inferred_pattern
+                    )
                     ON DUPLICATE KEY UPDATE
                         title = IF(COALESCE(VALUES(ratings_total), 0) >= COALESCE(ratings_total, 0), VALUES(title), title),
                         link = VALUES(link),
@@ -134,7 +142,10 @@ class SearchService:
                             ELSE LEAST(search_rank, VALUES(search_rank))
                         END,
                         image_url = COALESCE(VALUES(image_url), image_url),
-                        last_update = VALUES(last_update)
+                        last_update = VALUES(last_update),
+                        title_inferred_item_count = VALUES(title_inferred_item_count),
+                        title_inferred_pattern = VALUES(title_inferred_pattern),
+                        item_count_updated_at = NULL
                 """)
                 conn.execute(query, {
                     "asin": asin,
@@ -146,8 +157,10 @@ class SearchService:
                     "ratings_total": ratings_total,
                     "search_term": search_term,
                     "search_rank": search_rank,
-                    "image_url": image_url,  # Store Rainforest API URL directly
-                    "last_update": datetime.datetime.utcnow()
+                    "image_url": image_url,
+                    "last_update": datetime.datetime.utcnow(),
+                    "title_inferred_item_count": title_fields["title_inferred_item_count"],
+                    "title_inferred_pattern": title_fields["title_inferred_pattern"],
                 })
                 saved_count += 1
             

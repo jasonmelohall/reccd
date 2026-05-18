@@ -14,7 +14,11 @@ SHARED_DIR = os.path.join(BASE_DIR, "shared")
 sys.path.insert(0, SHARED_DIR)
 
 import reccd_items
-from reccd_items import get_parent_asin_from_rainforest, consolidate_parent_items
+from reccd_items import (
+    get_parent_asin_from_rainforest,
+    consolidate_parent_items,
+    title_inference_fields,
+)
 
 # Config
 RAIN_API_KEY = os.getenv("RAINFOREST_API_KEY")
@@ -126,10 +130,19 @@ def save_items_batch(consolidated_items):
             logging.info(f"Skipping duplicate item (already exists with same price/rating/ratings_total): {title}")
             continue
         
-        # Insert with parent_asin and image_url fields
+        title_fields = title_inference_fields(title)
+
         query = text("""
-            INSERT INTO items (asin, parent_asin, title, link, price, rating, ratings_total, search_term, search_rank, image_url, last_update)
-            VALUES (:asin, :parent_asin, :title, :link, :price, :rating, :ratings_total, :search_term, :search_rank, :image_url, :last_update)
+            INSERT INTO items (
+                asin, parent_asin, title, link, price, rating, ratings_total,
+                search_term, search_rank, image_url, last_update,
+                title_inferred_item_count, title_inferred_pattern
+            )
+            VALUES (
+                :asin, :parent_asin, :title, :link, :price, :rating, :ratings_total,
+                :search_term, :search_rank, :image_url, :last_update,
+                :title_inferred_item_count, :title_inferred_pattern
+            )
             ON DUPLICATE KEY UPDATE
                 title = IF(COALESCE(VALUES(ratings_total), 0) >= COALESCE(ratings_total, 0), VALUES(title), title),
                 link = VALUES(link),
@@ -147,7 +160,10 @@ def save_items_batch(consolidated_items):
                     ELSE LEAST(search_rank, VALUES(search_rank))
                 END,
                 image_url = COALESCE(VALUES(image_url), image_url),
-                last_update = VALUES(last_update)
+                last_update = VALUES(last_update),
+                title_inferred_item_count = VALUES(title_inferred_item_count),
+                title_inferred_pattern = VALUES(title_inferred_pattern),
+                item_count_updated_at = NULL
         """)
         conn.execute(query, {
             "asin": asin,
@@ -160,7 +176,9 @@ def save_items_batch(consolidated_items):
             "search_term": search_term,
             "search_rank": search_rank,
             "image_url": image_url,
-            "last_update": datetime.datetime.utcnow()
+            "last_update": datetime.datetime.utcnow(),
+            "title_inferred_item_count": title_fields["title_inferred_item_count"],
+            "title_inferred_pattern": title_fields["title_inferred_pattern"],
         })
     
     conn.commit()

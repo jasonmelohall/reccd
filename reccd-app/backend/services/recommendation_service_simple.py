@@ -29,7 +29,7 @@ class SimpleRecommendationService:
         """
         search_pattern = f"%{search_term}%"
         
-        query = text("""
+        query_str = """
             SELECT 
                 asin,
                 parent_asin,
@@ -47,13 +47,13 @@ class SimpleRecommendationService:
             AND title IS NOT NULL
             ORDER BY (rating * COALESCE(ratings_total, 0)) DESC
             LIMIT :limit
-        """)
-        
+        """
+        stmt = text(query_str).bindparams(search_term=search_pattern, limit=limit)
         with get_db_connection() as conn:
-            df = pd.read_sql(query, conn, params={
-                "search_term": search_pattern,
-                "limit": limit
-            })
+            result = conn.execute(stmt)
+            rows = result.fetchall()
+            columns = result.keys()
+        df = pd.DataFrame(rows, columns=columns) if rows else pd.DataFrame()
         
         if len(df) == 0:
             logger.info(f"No items found for search term: {search_term}")

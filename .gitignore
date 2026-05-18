@@ -2,3 +2,6 @@
 /*
 !.gitignore
 !/reccd-app
+
+# Local normalization testing (see testing/README.md)
+testing/

@@ -159,6 +159,8 @@ const ResultsScreen = ({ route }) => {
           parent_asin: item.parent_asin || null,
           title: item.title || null,
           price: item.price || null,
+          item_count: item.item_count || null,
+          price_per_item: item.price_per_item || null,
           rating: item.rating || null,
           ratings_total: item.ratings_total || null,
           frequency: item.frequency || null,
@@ -166,6 +168,7 @@ const ResultsScreen = ({ route }) => {
           release_date: item.release_date || null,
           reccd_score: item.reccd_score || null,
           price_percentile: item.price_percentile || null,
+          item_count_percentile: item.item_count_percentile || null,
           rating_percentile: item.rating_percentile || null,
           release_date_percentile: item.release_date_percentile || null,
           frequency_percentile: item.frequency_percentile || null,
@@ -225,7 +228,11 @@ const ResultsScreen = ({ route }) => {
             ))}
           </View>
         )}
-        <Text style={styles.price}>${item.price?.toFixed?.(2) ?? '—'}</Text>
+        <Text style={styles.price}>
+          {item.price_per_item != null && item.item_count > 1
+            ? `$${item.price_per_item.toFixed(2)}/ea (${item.item_count}-pack $${item.price?.toFixed?.(2) ?? '—'})`
+            : `$${item.price?.toFixed?.(2) ?? '—'}`}
+        </Text>
         <View style={styles.metaRow}>
           <Text style={styles.metaText}>Rating: {item.rating?.toFixed?.(1) ?? '—'}</Text>
           <Text style={styles.metaText}>Reviews: {item.ratings_total ?? '—'}</Text>

@@ -191,7 +191,7 @@ try:
     # Join all exclude conditions with AND
     exclude_clause = " AND ".join(exclude_conditions) if exclude_conditions else "1=1"
     
-    query = text(f"""
+    query_str = f"""
         SELECT *
         FROM items i
         WHERE ({like_clause})
@@ -204,9 +204,10 @@ try:
             AND u.is_relevant = 0
             AND u.search_term = i.search_term
         )
-    """)
-
-    df = pd.read_sql(query, conn, params=params)
+    """
+    result = conn.execute(text(query_str), params)
+    rows = result.fetchall()
+    df = pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
 
     # ✅ Ensure date columns are properly converted and release_date is min of all 3
     df['listed_date'] = pd.to_datetime(df['listed_date'], errors='coerce')
@@ -242,7 +243,10 @@ try:
     # Set default values for rows without valid dates
     df.loc[~not_null_mask, ['release_date_percentile', 'frequency_percentile']] = 1
 
-    df['price_percentile'] = df['price'].rank(pct=True)
+    monetary_col = df['price_per_item'].fillna(df['price']) if 'price_per_item' in df.columns else df['price']
+    df['price_percentile'] = monetary_col.rank(pct=True)
+    if 'price_per_item' in df.columns:
+        df['item_count_percentile'] = df['price_per_item'].rank(pct=True)
     df['rating_percentile'] = df['rating'].rank(pct=True)
     df['search_rank_percentile'] = df['search_rank'].rank(pct=True)
 
@@ -272,10 +276,17 @@ try:
         # Prioritize items with complete data (ratings_total not NaN)
         # Sort by: parent_asin, has_ratings (desc to put True first), reccd (desc), search_rank (asc), price (asc)
         items_with_parent['has_ratings'] = items_with_parent['ratings_total'].notna()
+        if 'price_per_item' in items_with_parent.columns:
+            items_with_parent['_sort_price'] = items_with_parent['price_per_item'].fillna(
+                items_with_parent['price']
+            )
+        else:
+            items_with_parent['_sort_price'] = items_with_parent['price']
         items_with_parent = items_with_parent.sort_values(
-            ['parent_asin', 'has_ratings', 'reccd', 'search_rank', 'price'], 
+            ['parent_asin', 'has_ratings', 'reccd', 'search_rank', '_sort_price'],
             ascending=[True, False, False, True, True]
         )
+        items_with_parent = items_with_parent.drop(columns=['_sort_price'], errors='ignore')
         
         # Keep first occurrence of each parent (has ratings, best reccd, best rank, best price)
         items_with_parent = items_with_parent.drop_duplicates(
@@ -314,9 +325,14 @@ try:
     print(f"\n=== Total Rows: {len(df):,} ===")
 
     print(f"\n=== Final Recommendations ===")
-    print(df[['title', 'price', 'rating', 'ratings_total', 'frequency', 'search_rank',
-              'listed_date', 'oldest_review', 'release_date', 'reccd', 'asin',
-              'clean_link', 'last_update']].head(PRINT_ROWS))
+    display_cols = [
+        'title', 'price', 'item_count', 'price_per_item',
+        'rating', 'ratings_total', 'frequency', 'search_rank',
+        'listed_date', 'oldest_review', 'release_date', 'reccd', 'asin',
+        'clean_link', 'last_update',
+    ]
+    display_cols = [c for c in display_cols if c in df.columns]
+    print(df[display_cols].head(PRINT_ROWS))
     print()
 
     coefficients_df = pd.DataFrame([{
@@ -375,12 +391,16 @@ try:
                     INSERT INTO items_user (
                         user_id, asin, parent_asin, title, price, rating, ratings_total, frequency, search_rank, release_date,
                         reccd_score, price_percentile, rating_percentile, release_date_percentile,
-                        frequency_percentile, search_rank_percentile, purchase_datetime, search_term, is_relevant, event_type
+                        frequency_percentile, search_rank_percentile,
+                        item_count, price_per_item, item_count_percentile,
+                        purchase_datetime, search_term, is_relevant, event_type
                     )
                     VALUES (
                         :user_id, :asin, :parent_asin, :title, :price, :rating, :ratings_total, :frequency, :search_rank, :release_date,
                         :reccd_score, :price_percentile, :rating_percentile, :release_date_percentile,
-                        :frequency_percentile, :search_rank_percentile, :purchase_datetime, :search_term, :is_relevant, :event_type
+                        :frequency_percentile, :search_rank_percentile,
+                        :item_count, :price_per_item, :item_count_percentile,
+                        :purchase_datetime, :search_term, :is_relevant, :event_type
                     )
                 """), {
                     "user_id": USER_ID,
@@ -399,6 +419,9 @@ try:
                     "release_date_percentile": clean(row['release_date_percentile']),
                     "frequency_percentile": clean(row['frequency_percentile']),
                     "search_rank_percentile": clean(row['search_rank_percentile']),
+                    "item_count": clean(row.get('item_count')),
+                    "price_per_item": clean(row.get('price_per_item')),
+                    "item_count_percentile": clean(row.get('item_count_percentile')),
                     "purchase_datetime": now,
                     "search_term": row['search_term'],
                     "is_relevant": not is_negative,

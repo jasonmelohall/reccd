@@ -8,7 +8,7 @@ import datetime
 import logging
 from typing import List, Optional
 
-from database import get_db_connection, engine
+from database import get_db_connection
 from config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -149,13 +149,15 @@ class RecommendationService:
                 )
             """
             with get_db_connection() as conn:
-                result = conn.execute(text(query_str), params)
+                stmt = text(query_str).bindparams(**params)
+                result = conn.execute(stmt)
                 rows = result.fetchall()
                 if not rows:
                     df = pd.DataFrame()
                 else:
                     df = pd.DataFrame(rows, columns=result.keys())
         else:
+            logger.info("get_recommendations: single-term path (execute+DataFrame, no pd.read_sql)")
             if wildcard_mode == 'both_ends':
                 search_pattern = f"%{search_term}%"
             elif wildcard_mode == 'start_only':
@@ -165,7 +167,9 @@ class RecommendationService:
             else:
                 search_pattern = search_term
 
-            query = text("""
+            # Avoid pd.read_sql entirely: execute with connection and build DataFrame from rows.
+            # This sidesteps "Query must be a string unless using sqlalchemy" across pandas/sqlalchemy versions.
+            query_str = """
                 SELECT *
                 FROM items i
                 WHERE i.search_term LIKE :search_term
@@ -177,12 +181,15 @@ class RecommendationService:
                     AND u.is_relevant = 0
                     AND u.search_term = i.search_term
                 )
-            """)
-            # Use engine (not conn) so pandas accepts SQLAlchemy text() object
-            df = pd.read_sql(query, engine, params={
-                "search_term": search_pattern,
-                "user_id": user_id
-            })
+            """
+            with get_db_connection() as conn:
+                stmt = text(query_str).bindparams(
+                    search_term=search_pattern,
+                    user_id=user_id,
+                )
+                result = conn.execute(stmt)
+                rows = result.fetchall()
+                df = pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
 
         if len(df) == 0:
             logger.info("No items found for search (term=%s, terms=%s)", search_term, search_terms)
@@ -225,8 +232,13 @@ class RecommendationService:
         # Set default values for rows without valid dates
         df.loc[~not_null_mask, ['release_date_percentile', 'frequency_percentile']] = 1
         
-        # Calculate other percentiles
-        df['price_percentile'] = df['price'].rank(pct=True)
+        # Monetary percentile uses per-unit price when resolved
+        if 'price_per_item' in df.columns:
+            monetary_col = df['price_per_item'].fillna(df['price'])
+            df['item_count_percentile'] = df['price_per_item'].rank(pct=True)
+        else:
+            monetary_col = df['price']
+        df['price_percentile'] = monetary_col.rank(pct=True)
         df['rating_percentile'] = df['rating'].rank(pct=True)
         df['search_rank_percentile'] = df['search_rank'].rank(pct=True)
         
@@ -246,11 +258,18 @@ class RecommendationService:
         standalone_items = df[~has_parent].copy()
         
         if len(items_with_parent) > 0:
+            if 'price_per_item' in items_with_parent.columns:
+                items_with_parent['_sort_price'] = items_with_parent['price_per_item'].fillna(
+                    items_with_parent['price']
+                )
+            else:
+                items_with_parent['_sort_price'] = items_with_parent['price']
             items_with_parent['has_ratings'] = items_with_parent['ratings_total'].notna()
             items_with_parent = items_with_parent.sort_values(
-                ['parent_asin', 'has_ratings', 'reccd_score', 'search_rank', 'price'],
+                ['parent_asin', 'has_ratings', 'reccd_score', 'search_rank', '_sort_price'],
                 ascending=[True, False, False, True, True]
             )
+            items_with_parent = items_with_parent.drop(columns=['_sort_price'], errors='ignore')
             items_with_parent = items_with_parent.drop_duplicates(
                 subset=['parent_asin'],
                 keep='first'

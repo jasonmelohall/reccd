@@ -34,11 +34,13 @@ class PipelineService:
             "1_search_items_rainforest.py",
             "2_items_get_listed_date_keepa.py",
             "3_get_first_available_rainforest.py",
+            "32_item_count_resolution.py",
             "8_regression_items.py",
             "9_reccd_items.py"
         ]
         self.script_timeouts = {
             "2_items_get_listed_date_keepa.py": 1200,  # Keepa calls can take longer
+            "32_item_count_resolution.py": 1800,
         }
     
     def run_full_pipeline(self, search_term: Union[str, List[str]]):

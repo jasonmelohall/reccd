@@ -1,3 +1,5 @@
+
+
 # Reccd Mobile App
 
 Cross-platform app (iOS, Android, Web) for personalized Amazon product recommendations.

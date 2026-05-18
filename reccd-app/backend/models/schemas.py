@@ -30,6 +30,9 @@ class ProductItem(BaseModel):
     link: Optional[str] = None  # Allow NULL links
     image_url: Optional[str] = None
     price: Optional[float] = None
+    item_count: Optional[int] = None
+    price_per_item: Optional[float] = None
+    item_count_percentile: Optional[float] = None
     rating: Optional[float] = None
     ratings_total: Optional[int] = None
     search_rank: Optional[int] = None
@@ -66,6 +69,8 @@ class ClickEventRequest(BaseModel):
     parent_asin: Optional[str] = None
     title: Optional[str] = None
     price: Optional[float] = None
+    item_count: Optional[int] = None
+    price_per_item: Optional[float] = None
     rating: Optional[float] = None
     ratings_total: Optional[int] = None
     frequency: Optional[float] = None
@@ -73,6 +78,7 @@ class ClickEventRequest(BaseModel):
     release_date: Optional[str] = None  # ISO format string
     reccd_score: Optional[float] = None
     price_percentile: Optional[float] = None
+    item_count_percentile: Optional[float] = None
     rating_percentile: Optional[float] = None
     release_date_percentile: Optional[float] = None
     frequency_percentile: Optional[float] = None
