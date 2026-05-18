@@ -1,7 +1,26 @@
-# Track only reccd-app; ignore everything else at repo root
-/*
-!.gitignore
-!/reccd-app
-
-# Local normalization testing (see testing/README.md)
+# Local monorepo (not for GitHub deploy)
 testing/
+
+# Node / Expo (root app from GitHub + reccd-app/)
+node_modules/
+.expo/
+.expo-shared/
+.DS_Store
+.env
+build/
+reccd-app/node_modules/
+reccd-app/.expo/
+
+# Backend Python artifacts (root + reccd-app)
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.env
+backend/.pytest_cache/
+reccd-app/backend/venv/
+reccd-app/backend/.venv/
+reccd-app/backend/__pycache__/
+reccd-app/backend/**/__pycache__/
+reccd-app/backend/.env
+reccd-app/backend/.pytest_cache/
