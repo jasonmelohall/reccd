@@ -12,6 +12,7 @@ SHARED_DIR = os.path.join(BASE_DIR, "shared")
 sys.path.insert(0, SHARED_DIR)
 
 import reccd_items
+from reccd_items import apply_valid_release_dates
 
 # === Configuration ===
 PRINT_ROWS = 21
@@ -209,13 +210,7 @@ try:
     rows = result.fetchall()
     df = pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
 
-    # ✅ Ensure date columns are properly converted and release_date is min of all 3
-    df['listed_date'] = pd.to_datetime(df['listed_date'], errors='coerce')
-    df['oldest_review'] = pd.to_datetime(df['oldest_review'], errors='coerce')
-    df['release_date'] = pd.to_datetime(
-        df[['release_date', 'listed_date', 'oldest_review']].min(axis=1),
-        errors='coerce'
-    )
+    df = apply_valid_release_dates(df)
 
     # === Calculate Features ===
     today = datetime.datetime.now()

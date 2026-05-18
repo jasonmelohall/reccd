@@ -15,7 +15,11 @@ SHARED_DIR = os.path.join(BASE_DIR, "shared")
 sys.path.insert(0, SHARED_DIR)
 
 import reccd_items
-from reccd_items import get_parent_asin_from_rainforest
+from reccd_items import (
+    earliest_valid_release_date,
+    get_parent_asin_from_rainforest,
+    sanitize_product_datetime,
+)
 
 # Config
 RAIN_API_KEY = os.getenv("RAINFOREST_API_KEY")
@@ -78,18 +82,27 @@ if __name__ == "__main__":
 
         # Match items by exact search_term (one term per row)
         result = conn.execute(text("""
-            SELECT asin, ratings_total FROM items
-            WHERE release_date IS NULL
+            SELECT asin, ratings_total, listed_date, oldest_review, release_date
+            FROM items
+            WHERE (
+                release_date IS NULL
+                OR release_date < '2011-01-02'
+                OR listed_date < '2011-01-02'
+            )
             AND search_term = :term
         """), {"term": term}).fetchall()
 
-        asin_data = [(row[0], row[1]) for row in result]
+        asin_data = [tuple(row) for row in result]
         logging.info(f"Found {len(asin_data)} items to update for search term '{term}'.")
 
         success_count = 0
         fail_count = 0
 
-        for idx, (asin, current_ratings_total) in enumerate(asin_data, start=1):
+        for idx, row in enumerate(asin_data, start=1):
+            asin = row[0]
+            current_ratings_total = row[1]
+            existing_listed = row[2] if len(row) > 2 else None
+            existing_oldest_review = row[3] if len(row) > 3 else None
             parent_asin, first_available_str, oldest_review_str, ratings_total, title, price, rating, unit_json = fetch_product_dates(asin)
             update_fields = {}
             
@@ -97,16 +110,29 @@ if __name__ == "__main__":
             if parent_asin:
                 update_fields['parent_asin'] = parent_asin
 
+            first_available = None
             if first_available_str:
-                first_available = pd.to_datetime(first_available_str, errors='coerce')
-                if first_available is not pd.NaT:
-                    update_fields['first_available'] = first_available
-                    update_fields['release_date'] = first_available  # 🔥 also sets release_date
+                fa_raw = pd.to_datetime(first_available_str, errors='coerce')
+                if fa_raw is not pd.NaT:
+                    first_available = sanitize_product_datetime(fa_raw)
+                    if first_available is not None:
+                        update_fields['first_available'] = first_available
 
             if oldest_review_str:
-                oldest_review = pd.to_datetime(oldest_review_str, errors='coerce')
-                if oldest_review is not pd.NaT:
-                    update_fields['oldest_review'] = oldest_review
+                or_raw = pd.to_datetime(oldest_review_str, errors='coerce')
+                if or_raw is not pd.NaT:
+                    rf_review = sanitize_product_datetime(or_raw)
+                    if rf_review is not None:
+                        update_fields['oldest_review'] = rf_review
+
+            eff_release = earliest_valid_release_date(
+                first_available,
+                update_fields.get('oldest_review'),
+                existing_listed,
+                existing_oldest_review,
+            )
+            if eff_release is not None:
+                update_fields['release_date'] = eff_release
 
             # Only update ratings_total (and associated metadata) if new value is greater than existing, or if existing is NULL
             if ratings_total is not None:

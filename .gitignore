@@ -1,26 +1,70 @@
-# Local monorepo (not for GitHub deploy)
+# =============================================================================
+# Reccd workspace (local monorepo)
+#
+# SHIP:  only reccd-app/ is published to GitHub / Elastic Beanstalk / Expo.
+# LOCAL: items/, audio/, etc. are pipeline labs — never commit.
+# =============================================================================
+
+# --- Local pipeline & experiment dirs (not shipped) ---
+items/
+audio/
+audio_practice/
+fantasy_football/
+literature/
+organizations/
+places/
+recipes/
+vehicles/
+video/
+Archive/
 testing/
 
-# Node / Expo (root app from GitHub + reccd-app/)
+# --- Local scripts, logs, secrets, backups ---
+*.log
+*.sql
+*.sql.gz
+.env
+.env.*
+!.env.example
+spotify_token.json
+backup_reccd_database.py
+top_features_for_walkforward.txt
+00_migrate_location_table.py
+0
+.cache/
+.cursor/
+.zshrc
+
+# --- Duplicate app tree at repo root (canonical copy is reccd-app/) ---
+# If these still appear in `git status`, run once:
+#   git rm -r --cached backend/ src/ scripts/ App.js app.json babel.config.js ...
+/App.js
+/app.json
+/babel.config.js
+/assets/
+/backend/
+/src/
+/scripts/
+/runtime.txt
+/package.json
+/package-lock.json
+/package-lock*.json
+/.watchmanconfig
+
+# --- Node / Expo (reccd-app only; paths relative to repo root) ---
 node_modules/
 .expo/
 .expo-shared/
 .DS_Store
-.env
 build/
 reccd-app/node_modules/
 reccd-app/.expo/
 
-# Backend Python artifacts (root + reccd-app)
-backend/venv/
-backend/.venv/
-backend/__pycache__/
-backend/**/__pycache__/
-backend/.env
-backend/.pytest_cache/
+# --- Python artifacts (reccd-app backend) ---
 reccd-app/backend/venv/
 reccd-app/backend/.venv/
 reccd-app/backend/__pycache__/
 reccd-app/backend/**/__pycache__/
 reccd-app/backend/.env
 reccd-app/backend/.pytest_cache/
+reccd-app/backend/.elasticbeanstalk/

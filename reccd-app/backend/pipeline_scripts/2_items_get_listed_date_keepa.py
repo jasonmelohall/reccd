@@ -4,7 +4,7 @@
 import logging
 import time
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 import os
 import requests
 from sqlalchemy import text
@@ -15,11 +15,14 @@ SHARED_DIR = os.path.join(BASE_DIR, "shared")
 sys.path.insert(0, SHARED_DIR)
 
 from reccd_items import (
-    mysqlengine,
-    get_search_term,
-    get_parent_asin_from_keepa,
-    get_variation_asins_from_keepa,
+    earliest_valid_release_date,
     get_keepa_unit_fields,
+    get_parent_asin_from_keepa,
+    get_search_term,
+    get_variation_asins_from_keepa,
+    keepa_minutes_to_datetime,
+    mysqlengine,
+    sanitize_product_datetime,
 )
 
 # Setup logging
@@ -54,7 +57,6 @@ def get_listed_date(asin):
     Get product dates from Keepa API.
     For parent ASINs with variations, aggregates earliest dates across all variations.
     """
-    base_date = datetime(2011, 1, 1)
     max_retries = 5
     delay = 60
 
@@ -86,11 +88,8 @@ def get_listed_date(asin):
             parent_asin = get_parent_asin_from_keepa(product)
             variation_asins = get_variation_asins_from_keepa(product)
             
-            # Get listed date
-            listed_min = product.get('listedSince')
-            listed_date = base_date + timedelta(minutes=listed_min) if listed_min is not None else None
+            listed_date = keepa_minutes_to_datetime(product.get("listedSince"))
 
-            # Get oldest review date from reviewCountHistory (CSV style)
             csv = product.get("csv", [])
             review_csv = csv[17] if len(csv) > 17 and csv[17] is not None else []
 
@@ -98,9 +97,11 @@ def get_listed_date(asin):
             for i in range(0, len(review_csv), 2):
                 timestamp = review_csv[i]
                 count = review_csv[i + 1]
-                if count > 0:
-                    oldest_review_date = base_date + timedelta(minutes=timestamp)
-                    break
+                if count and count > 0:
+                    candidate = keepa_minutes_to_datetime(timestamp)
+                    if candidate is not None:
+                        oldest_review_date = candidate
+                        break
 
             # For parent ASINs with variations, we could fetch variation dates to get earliest
             # But this would add significant API calls. For now, parent's dates should be representative.
@@ -190,13 +191,20 @@ for term in SEARCH_TERMS:
         print(f"   • Ratings total     : {ratings_total if ratings_total else 'None'}")
         print()
 
+        listed_date = sanitize_product_datetime(listed_date)
+        oldest_review = sanitize_product_datetime(oldest_review)
+        effective_release = earliest_valid_release_date(listed_date, oldest_review)
+
         update_fields = {
             'listed_date': listed_date,
             'oldest_review': oldest_review,
-            'asin': asin
+            'asin': asin,
         }
-        
-        # Update parent_asin if found
+        release_date_clause = ""
+        if effective_release is not None:
+            update_fields['release_date'] = effective_release
+            release_date_clause = "release_date = :release_date,\n"
+
         parent_asin_clause = ""
         if parent_asin:
             update_fields['parent_asin'] = parent_asin
@@ -222,14 +230,7 @@ for term in SEARCH_TERMS:
                 oldest_review = :oldest_review,
                 {rating_clause}
                 {ratings_total_clause}
-                release_date = CASE
-                    WHEN release_date IS NULL OR (
-                        COALESCE(:listed_date, '9999-12-31') < release_date
-                        AND COALESCE(:listed_date, '9999-12-31') IS NOT NULL
-                    )
-                    THEN :listed_date
-                    ELSE release_date
-                END,
+                {release_date_clause}
                 listed_last_update = NOW()
             WHERE asin = :asin
         """
@@ -251,7 +252,8 @@ for term in SEARCH_TERMS:
             parent_asin_clause=parent_asin_clause,
             keepa_clause=keepa_clause,
             rating_clause=rating_clause,
-            ratings_total_clause=ratings_total_clause
+            ratings_total_clause=ratings_total_clause,
+            release_date_clause=release_date_clause,
         ))
         conn.execute(update_stmt, update_fields)
         conn.commit()

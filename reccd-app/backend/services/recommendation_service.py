@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from database import get_db_connection
 from config import get_settings
+from shared.reccd_items import apply_valid_release_dates
 
 logger = logging.getLogger(__name__)
 
@@ -196,13 +197,7 @@ class RecommendationService:
             return [], coefficients, constant
         logger.info("Found %s items for search", len(df))
 
-        # Convert date columns
-        df['listed_date'] = pd.to_datetime(df['listed_date'], errors='coerce')
-        df['oldest_review'] = pd.to_datetime(df['oldest_review'], errors='coerce')
-        df['release_date'] = pd.to_datetime(
-            df[['release_date', 'listed_date', 'oldest_review']].min(axis=1),
-            errors='coerce'
-        )
+        df = apply_valid_release_dates(df)
         
         # Calculate features (always calculate in memory - scores are relative to current result set)
         today = datetime.datetime.now()

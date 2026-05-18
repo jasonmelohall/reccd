@@ -2,6 +2,18 @@
 
 Cross-platform app (iOS, Android, Web) for personalized Amazon product recommendations.
 
+## Workspace layout
+
+This folder is a **local monorepo**. Only **`reccd-app/`** is published to GitHub and deployed.
+
+| Path | Purpose |
+|------|---------|
+| `reccd-app/` | Shipped app + API (Expo, `backend/`, pipeline scripts for production) |
+| `items/` | Local pipeline lab — develop/test scripts, then port changes into `reccd-app/backend/` |
+| `audio/`, `audio_practice/`, … | Other experiments (gitignored) |
+
+**Workflow:** prototype in `items/` (or run `00_items_full.py`), copy shared logic into `reccd-app/backend/shared/reccd_items.py`, commit and push from repo root with paths under `reccd-app/` only.
+
 ## Quick Start
 
 ```bash

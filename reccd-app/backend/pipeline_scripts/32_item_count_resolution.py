@@ -61,9 +61,11 @@ update_query = text("""
     UPDATE items
     SET
         item_count = :item_count,
+        count_type = :count_type,
         item_count_source = :item_count_source,
         price_per_item = :price_per_item,
         title_inferred_item_count = :title_inferred_item_count,
+        title_inferred_count_type = :title_inferred_count_type,
         title_inferred_pattern = :title_inferred_pattern,
         item_count_updated_at = UTC_TIMESTAMP()
     WHERE asin = :asin
