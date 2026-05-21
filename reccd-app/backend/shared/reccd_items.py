@@ -186,12 +186,41 @@ def fetch_parent_product_rainforest(parent_asin: str, api_key: str) -> Optional[
 # count_type: each | pound | ounce | kilogram | gram
 # item_count: quantity in that unit (e.g. 7 + pound -> 7 lb bag, price_per_item = $/lb)
 
+_MULTIPLY_COUNT_PATTERNS: Sequence[Tuple[str, re.Pattern]] = (
+    (
+        "n_boxes_of_m",
+        re.compile(r"\b(\d{1,3})\s*box(?:e?s)?\s+of\s+(\d{1,4})\b", re.I),
+    ),
+    (
+        "bracket_boxes_of_m",
+        re.compile(r"\[\s*(\d{1,3})\s*box(?:e?s)?\s+of\s+(\d{1,4})\s*\]", re.I),
+    ),
+)
+
 _COUNT_PATTERNS: Sequence[Tuple[str, re.Pattern]] = (
     ("pack_of_n", re.compile(r"\bpack\s+of\s+(\d{1,4})\b", re.I)),
     ("n_pack", re.compile(r"\b(\d{1,3})\s*[-]?\s*pack\b", re.I)),
     ("n_pcs", re.compile(r"\b(\d{1,4})\s*pcs\b", re.I)),
     ("n_pk", re.compile(r"\b(\d{1,3})\s*pk\b", re.I)),
-    ("n_count", re.compile(r"\b(\d{1,4})\s*[-]?\s*count\b", re.I)),
+    ("n_count", re.compile(r"\b(\d{1,4})\s*[-]?\s*counts?\b", re.I)),
+    ("n_loads", re.compile(r"\b(\d{1,4})\s*[-]?\s*loads?\b", re.I)),
+    ("paren_n_loads", re.compile(r"\(\s*(\d{1,4})\s*[-]?\s*loads?\b", re.I)),
+    (
+        "n_tabs",
+        re.compile(r"\b(\d{1,4})\s+(?:[-\w]+\s+){0,3}tabs?\b", re.I),
+    ),
+    (
+        "n_tablets",
+        re.compile(r"\b(\d{1,4})\s+(?:[-\w]+\s+){0,3}tablets?\b", re.I),
+    ),
+    (
+        "n_pods",
+        re.compile(r"\b(\d{1,4})\s+(?:[-\w]+\s+){0,3}pods?\b", re.I),
+    ),
+    (
+        "n_pacs",
+        re.compile(r"\b(\d{1,4})\s+(?:[-\w]+\s+){0,3}pacs?\b", re.I),
+    ),
     ("n_ct_word", re.compile(r"\b(\d{1,4})\s*ct\b", re.I)),
     ("n_pieces", re.compile(r"\b(\d{1,4})\s*[-]?\s*pieces?\b", re.I)),
     ("n_units", re.compile(r"\b(\d{1,4})\s*units?\b", re.I)),
@@ -260,11 +289,29 @@ def _parse_weight_quantity(match: re.Match, pattern_name: str) -> Optional[float
 
 
 def _is_seed_bulk_each_count(title: str, n: int, pattern_name: str) -> bool:
-    """Skip multipack each-count when the number is almost certainly seeds/pcs in title."""
+    """Skip multipack each-count only when title context looks like bulk seeds, not detergent/count."""
     t = title.lower()
-    if n >= 100 and re.search(r"\b(seeds?|seed\s+count)\b", t):
+    seed_context = bool(
+        re.search(
+            r"\b(seeds?|seed\s+count|grass\s+seed|lawn\s+seed|wildflower)\b",
+            t,
+        )
+    )
+    if seed_context and n >= 100:
         return True
-    if n >= 50 and pattern_name in ("n_pcs", "n_count", "n_pieces", "n_units", "n_ct_word"):
+    if seed_context and n >= 50 and pattern_name in (
+        "n_pcs",
+        "n_count",
+        "n_loads",
+        "paren_n_loads",
+        "n_tabs",
+        "n_tablets",
+        "n_pods",
+        "n_pacs",
+        "n_pieces",
+        "n_units",
+        "n_ct_word",
+    ):
         return True
     if n >= 500:
         return True
@@ -292,6 +339,19 @@ def infer_quantity_from_title(
         if qty is None or qty < _MIN_WEIGHT_QTY or qty > _MAX_WEIGHT_QTY:
             continue
         return qty, count_type, name
+
+    for name, pat in _MULTIPLY_COUNT_PATTERNS:
+        m = pat.search(title)
+        if not m:
+            continue
+        try:
+            n = int(m.group(1)) * int(m.group(2))
+        except (TypeError, ValueError):
+            continue
+        if _is_seed_bulk_each_count(title, n, name):
+            continue
+        if _MIN_EACH_COUNT <= n <= _MAX_EACH_COUNT:
+            return float(n), "each", name
 
     for name, pat in _COUNT_PATTERNS:
         if name == "n_pieces" and re.search(r"\b(puzzle|jigsaw)\b", t):
