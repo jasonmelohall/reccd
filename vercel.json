@@ -1,0 +1,6 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "installCommand": "cd reccd-app && npm install",
+  "buildCommand": "cd reccd-app && npm run build:web",
+  "outputDirectory": "reccd-app/web-build"
+}
