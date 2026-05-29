@@ -12,7 +12,7 @@ SHARED_DIR = os.path.join(BASE_DIR, "shared")
 sys.path.insert(0, SHARED_DIR)
 
 import reccd_items
-from reccd_items import apply_valid_release_dates
+from reccd_items import apply_item_count_fields_to_dataframe, apply_valid_release_dates
 
 # === Configuration ===
 PRINT_ROWS = 21
@@ -80,50 +80,49 @@ def load_user_coefficients(engine):
             'search_rank_percentile': result.item_search
         }
         
-        # Get non-NULL coefficients for fallback calculations
+        # Correct invalid values BEFORE calculating fallbacks
+        if coefficients['frequency_percentile'] is not None and coefficients['frequency_percentile'] < 0:
+            print(
+                f"⚠️  frequency_percentile was negative ({coefficients['frequency_percentile']:.6f}), "
+                "setting to None for fallback calculation"
+            )
+            coefficients['frequency_percentile'] = None
+
+        if coefficients['release_date_percentile'] is not None and coefficients['release_date_percentile'] < 0:
+            print(
+                f"⚠️  release_date_percentile was negative ({coefficients['release_date_percentile']:.6f}), "
+                "setting to None for fallback calculation"
+            )
+            coefficients['release_date_percentile'] = None
+
+        # Get non-NULL and valid coefficients for fallback calculations
         non_null_coeffs = {k: v for k, v in coefficients.items() if v is not None}
-        
+
         if not non_null_coeffs:
             raise ValueError("All coefficients are NULL - cannot calculate fallbacks")
-        
-        # Calculate fallback values
+
+        # Calculate fallback values: half of minimum absolute value of valid coefficients
         min_abs_value = min(abs(v) for v in non_null_coeffs.values())
-        
-        # Handle NULL values with fallback logic
+
         if coefficients['price_percentile'] is None:
-            # Use negative absolute value minimum of existing features / 2
             coefficients['price_percentile'] = -(min_abs_value / 2)
             print(f"⚠️  price_percentile was NULL, using fallback: {coefficients['price_percentile']:.6f}")
-        
+
         if coefficients['search_rank_percentile'] is None:
-            # Use negative absolute value minimum of existing features / 2
             coefficients['search_rank_percentile'] = -(min_abs_value / 2)
             print(f"⚠️  search_rank_percentile was NULL, using fallback: {coefficients['search_rank_percentile']:.6f}")
-        
+
         if coefficients['rating_percentile'] is None:
-            # Use positive absolute value minimum of existing features / 2
             coefficients['rating_percentile'] = min_abs_value / 2
             print(f"⚠️  rating_percentile was NULL, using fallback: {coefficients['rating_percentile']:.6f}")
-        
+
         if coefficients['frequency_percentile'] is None:
-            # Use positive absolute value minimum of existing features / 2
             coefficients['frequency_percentile'] = min_abs_value / 2
             print(f"⚠️  frequency_percentile was NULL, using fallback: {coefficients['frequency_percentile']:.6f}")
-        
-        # Ensure frequency_percentile is always positive
-        if coefficients['frequency_percentile'] < 0:
-            coefficients['frequency_percentile'] = min_abs_value / 2
-            print(f"⚠️  frequency_percentile was negative, corrected to: {coefficients['frequency_percentile']:.6f}")
-        
+
         if coefficients['release_date_percentile'] is None:
-            # Use positive absolute value minimum of existing features / 2
-            coefficients['release_date_percentile'] = abs(min_abs_value) / 2
+            coefficients['release_date_percentile'] = min_abs_value / 2
             print(f"⚠️  release_date_percentile was NULL, using fallback: {coefficients['release_date_percentile']:.6f}")
-        
-        # Ensure release_date_percentile is always positive
-        if coefficients['release_date_percentile'] < 0:
-            coefficients['release_date_percentile'] = abs(min_abs_value) / 2
-            print(f"⚠️  release_date_percentile was negative, corrected to: {coefficients['release_date_percentile']:.6f}")
         
         # Calculate constant to balance to 1
         constant = 1 - sum(coefficients.values())
@@ -210,6 +209,7 @@ try:
     rows = result.fetchall()
     df = pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
 
+    df = apply_item_count_fields_to_dataframe(df)
     df = apply_valid_release_dates(df)
 
     # === Calculate Features ===

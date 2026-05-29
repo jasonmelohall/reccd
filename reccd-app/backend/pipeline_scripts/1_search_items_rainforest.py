@@ -3,6 +3,8 @@
 
 import os
 import sys
+import json
+import time
 import requests
 from sqlalchemy import text
 import datetime
@@ -40,8 +42,8 @@ logging.basicConfig(
 )
 
 # === API Call ===
-def search_amazon(query, page=1):
-    logging.info(f"Searching Amazon for: {query} (page {page})")
+def search_amazon(query, page=1, max_retries=5):
+    """Search Amazon via Rainforest API with retry logic for transient errors."""
     url = "https://api.rainforestapi.com/request"
     params = {
         "api_key": RAIN_API_KEY,
@@ -50,15 +52,73 @@ def search_amazon(query, page=1):
         "search_term": query,
         "page": page
     }
-    response = requests.get(url, params=params)
-    
-    if response.status_code == 200:
-        logging.info("Successfully fetched search results.")
-        return response.json()
-    else:
-        logging.error(f"Error: {response.status_code} - {response.text}")
-        print(f"❌ Critical error with API. Stopping script.")
-        sys.exit(1)
+
+    headers = {
+        "User-Agent": "Reccd/1.0 (API Client)"
+    }
+
+    for attempt in range(1, max_retries + 1):
+        logging.info(f"Searching Amazon for: {query} (page {page}, attempt {attempt}/{max_retries})")
+        try:
+            response = requests.get(url, params=params, headers=headers)
+
+            if response.status_code == 200:
+                logging.debug("Successfully fetched search results.")
+                return response.json()
+            if response.status_code == 429:
+                retry_after = int(response.headers.get("Retry-After", 10))
+                logging.warning(f"Rate limited (429). Waiting {retry_after} seconds before retry...")
+                time.sleep(retry_after)
+                continue
+            if response.status_code in [500, 502, 503, 504]:
+                if attempt < max_retries:
+                    wait_time = min(2 ** attempt, 60)
+
+                    try:
+                        error_data = response.json()
+                        if isinstance(error_data, dict) and "request_info" in error_data:
+                            retry_after = error_data["request_info"].get("retry_after")
+                            if retry_after is not None:
+                                wait_time = int(retry_after)
+                                logging.warning(
+                                    f"Server error {response.status_code}: API requested retry after {wait_time} seconds"
+                                )
+                            else:
+                                error_msg = response.text[:200] if response.text else "No error message"
+                                logging.warning(f"Server error {response.status_code}: {error_msg}")
+                        else:
+                            error_msg = response.text[:200] if response.text else "No error message"
+                            logging.warning(f"Server error {response.status_code}: {error_msg}")
+                    except (json.JSONDecodeError, ValueError, KeyError):
+                        error_msg = response.text[:200] if response.text else "No error message"
+                        logging.warning(f"Server error {response.status_code}: {error_msg}")
+
+                    logging.info(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                    continue
+
+                logging.error(f"Error after {max_retries} attempts: {response.status_code} - {response.text}")
+                print(f"❌ Critical error with API after {max_retries} retries. Stopping script.")
+                sys.exit(1)
+
+            logging.error(f"Error: {response.status_code} - {response.text}")
+            print("❌ Critical error with API. Stopping script.")
+            sys.exit(1)
+        except requests.RequestException as exc:
+            if attempt < max_retries:
+                wait_time = min(2 ** attempt, 60)
+                logging.warning(f"Request exception (attempt {attempt}/{max_retries}): {exc}")
+                logging.info(f"Retrying in {wait_time} seconds...")
+                time.sleep(wait_time)
+                continue
+
+            logging.error(f"Request failed after {max_retries} attempts: {exc}")
+            print(f"❌ Critical error with API after {max_retries} retries. Stopping script.")
+            sys.exit(1)
+
+    logging.error(f"Failed to get response after {max_retries} attempts")
+    print(f"❌ Critical error with API after {max_retries} retries. Stopping script.")
+    sys.exit(1)
 
 # Extract item data and prepare for parent consolidation
 def extract_item_data(item, search_term, search_rank):
@@ -136,12 +196,12 @@ def save_items_batch(consolidated_items):
             INSERT INTO items (
                 asin, parent_asin, title, link, price, rating, ratings_total,
                 search_term, search_rank, image_url, last_update,
-                title_inferred_item_count, title_inferred_pattern
+                title_inferred_item_count, title_inferred_count_type, title_inferred_pattern
             )
             VALUES (
                 :asin, :parent_asin, :title, :link, :price, :rating, :ratings_total,
                 :search_term, :search_rank, :image_url, :last_update,
-                :title_inferred_item_count, :title_inferred_pattern
+                :title_inferred_item_count, :title_inferred_count_type, :title_inferred_pattern
             )
             ON DUPLICATE KEY UPDATE
                 title = IF(COALESCE(VALUES(ratings_total), 0) >= COALESCE(ratings_total, 0), VALUES(title), title),
@@ -162,6 +222,7 @@ def save_items_batch(consolidated_items):
                 image_url = COALESCE(VALUES(image_url), image_url),
                 last_update = VALUES(last_update),
                 title_inferred_item_count = VALUES(title_inferred_item_count),
+                title_inferred_count_type = VALUES(title_inferred_count_type),
                 title_inferred_pattern = VALUES(title_inferred_pattern),
                 item_count_updated_at = NULL
         """)
@@ -178,6 +239,7 @@ def save_items_batch(consolidated_items):
             "image_url": image_url,
             "last_update": datetime.datetime.utcnow(),
             "title_inferred_item_count": title_fields["title_inferred_item_count"],
+            "title_inferred_count_type": title_fields["title_inferred_count_type"],
             "title_inferred_pattern": title_fields["title_inferred_pattern"],
         })
     

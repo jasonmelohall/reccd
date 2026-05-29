@@ -183,8 +183,8 @@ def fetch_parent_product_rainforest(parent_asin: str, api_key: str) -> Optional[
 
 
 # ===== Item count / price per item =====
-# count_type: each | pound | ounce | kilogram | gram
-# item_count: quantity in that unit (e.g. 7 + pound -> 7 lb bag, price_per_item = $/lb)
+# count_type: each | ounce (weights normalized to total ounces for $/oz comparison)
+# item_count: each-count units, or total ounces when title has weight (lb/oz/kg/g/L/ml)
 
 _MULTIPLY_COUNT_PATTERNS: Sequence[Tuple[str, re.Pattern]] = (
     (
@@ -245,6 +245,14 @@ _WEIGHT_PATTERNS: Sequence[Tuple[str, re.Pattern, str]] = (
         "pound",
     ),
     (
+        "n_fl_oz",
+        re.compile(
+            r"\b(\d+(?:\.\d+)?)\s*(?:fl\.?\s*oz|fluid\s+ounces?)\b",
+            re.I,
+        ),
+        "ounce",
+    ),
+    (
         "n_oz",
         re.compile(
             r"\b(\d+(?:\.\d+)?)\s*(?:oz|ounce|ounces)\b",
@@ -263,17 +271,39 @@ _WEIGHT_PATTERNS: Sequence[Tuple[str, re.Pattern, str]] = (
     (
         "n_g",
         re.compile(
-            r"\b(\d+(?:\.\d+)?)\s*(?:g|gram|grams)\b",
+            r"\b(?<![%])(\d+(?:\.\d+)?)\s*(?:g|gram|grams)\b",
             re.I,
         ),
         "gram",
     ),
+    (
+        "n_ml",
+        re.compile(
+            r"\b(\d+(?:\.\d+)?)\s*(?:ml|milliliters?|millilitres?)\b",
+            re.I,
+        ),
+        "milliliter",
+    ),
+    (
+        "n_liter",
+        re.compile(
+            r"\b(\d+(?:\.\d+)?)\s*(?:l|liter|litre|liters|litres)\b",
+            re.I,
+        ),
+        "liter",
+    ),
 )
+
+_LB_TO_OZ = 16.0
+_KG_TO_OZ = 35.274
+_G_TO_OZ = 1.0 / 28.3495
+_L_TO_FL_OZ = 33.814
+_ML_TO_FL_OZ = 1.0 / 29.5735
 
 _MIN_EACH_COUNT = 2
 _MAX_EACH_COUNT = 2000
-_MIN_WEIGHT_QTY = 0.01
-_MAX_WEIGHT_QTY = 500.0
+_MIN_WEIGHT_OZ = 0.01
+_MAX_WEIGHT_OZ = 2000.0
 
 
 def _parse_weight_quantity(match: re.Match, pattern_name: str) -> Optional[float]:
@@ -286,6 +316,24 @@ def _parse_weight_quantity(match: re.Match, pattern_name: str) -> Optional[float
         return round(float(match.group(1)), 4)
     except (TypeError, ValueError):
         return None
+
+
+def _weight_to_ounces(qty: float, raw_unit: str) -> float:
+    """Normalize lb/kg/g/L/ml to ounces for comparable $/oz ranking."""
+    u = raw_unit.lower()
+    if u == "ounce":
+        return round(qty, 4)
+    if u == "pound":
+        return round(qty * _LB_TO_OZ, 4)
+    if u == "kilogram":
+        return round(qty * _KG_TO_OZ, 4)
+    if u == "gram":
+        return round(qty * _G_TO_OZ, 4)
+    if u in ("liter", "litre"):
+        return round(qty * _L_TO_FL_OZ, 4)
+    if u == "milliliter":
+        return round(qty * _ML_TO_FL_OZ, 4)
+    return round(qty, 4)
 
 
 def _is_seed_bulk_each_count(title: str, n: int, pattern_name: str) -> bool:
@@ -323,7 +371,8 @@ def infer_quantity_from_title(
 ) -> Tuple[Optional[float], Optional[str], Optional[str]]:
     """
     Returns (quantity, count_type, pattern_name).
-    Weight units are checked first (lb, oz, kg, g), then multipack each-count.
+    Title weights are normalized to total ounces (count_type='ounce').
+    Multipack each-count uses count_type='each'.
     """
     if not title or not isinstance(title, str):
         return None, None, None
@@ -331,14 +380,17 @@ def infer_quantity_from_title(
     if re.search(r"\b\d{1,2}\s*x\s*\d{1,2}\b", t):
         return None, None, None
 
-    for name, pat, count_type in _WEIGHT_PATTERNS:
+    for name, pat, raw_unit in _WEIGHT_PATTERNS:
         m = pat.search(title)
         if not m:
             continue
         qty = _parse_weight_quantity(m, name)
-        if qty is None or qty < _MIN_WEIGHT_QTY or qty > _MAX_WEIGHT_QTY:
+        if qty is None:
             continue
-        return qty, count_type, name
+        oz = _weight_to_ounces(qty, raw_unit)
+        if oz < _MIN_WEIGHT_OZ or oz > _MAX_WEIGHT_OZ:
+            continue
+        return oz, "ounce", name
 
     for name, pat in _MULTIPLY_COUNT_PATTERNS:
         m = pat.search(title)
@@ -383,6 +435,49 @@ def title_inference_fields(title: Optional[str]) -> Dict[str, Any]:
         "title_inferred_count_type": count_type,
         "title_inferred_pattern": pattern,
     }
+
+
+def apply_item_count_fields_to_dataframe(df):
+    """
+    Recompute item_count, count_type, and price_per_item from title + price
+    for in-memory ranking (e.g. 9_reccd_items). Requires pandas.
+    """
+    import pandas as pd
+
+    if df is None or df.empty or "title" not in df.columns:
+        return df
+
+    keepa_noi = "keepa_number_of_items" if "keepa_number_of_items" in df.columns else None
+    keepa_pq = "keepa_package_quantity" if "keepa_package_quantity" in df.columns else None
+    rf_unit = "rainforest_unit_price_json" if "rainforest_unit_price_json" in df.columns else None
+
+    for col in (
+        "item_count",
+        "count_type",
+        "item_count_source",
+        "price_per_item",
+        "title_inferred_item_count",
+        "title_inferred_count_type",
+        "title_inferred_pattern",
+    ):
+        if col not in df.columns:
+            df[col] = None
+
+    for idx in df.index:
+        title = df.at[idx, "title"]
+        if title is None or (isinstance(title, float) and pd.isna(title)):
+            continue
+        merged = merge_item_count_signals(
+            title=title,
+            price=df.at[idx, "price"] if "price" in df.columns else None,
+            keepa_number_of_items=df.at[idx, keepa_noi] if keepa_noi else None,
+            keepa_package_quantity=df.at[idx, keepa_pq] if keepa_pq else None,
+            rainforest_unit_price_json=df.at[idx, rf_unit] if rf_unit else None,
+        )
+        for key, val in merged.items():
+            df.at[idx, key] = val
+
+    return df
 
 
 def normalize_keepa_count_for_storage(value: Any) -> Optional[int]:
@@ -454,8 +549,7 @@ def merge_item_count_signals(
     (4) Title multipack each-count >= 2
     (5) default item_count=1, count_type=each
 
-    price_per_item is price divided by item_count in the stated count_type
-    (e.g. $/lb when count_type is pound).
+    price_per_item is price / item_count ($/each or $/oz when weight normalized).
     """
     _ = parse_rainforest_unit_price_json(rainforest_unit_price_json)
     title_fields = title_inference_fields(title)
@@ -468,9 +562,14 @@ def merge_item_count_signals(
     count_type = "each"
     item_count_source = "default"
 
-    if title_qty is not None and title_type and title_type != "each":
+    if title_qty is not None and title_type == "ounce":
         item_count = float(title_qty)
-        count_type = title_type
+        count_type = "ounce"
+        item_count_source = "title"
+    elif title_qty is not None and title_type and title_type != "each":
+        oz = _weight_to_ounces(float(title_qty), title_type)
+        item_count = oz
+        count_type = "ounce"
         item_count_source = "title"
     elif noi is not None and noi <= _MAX_EACH_COUNT:
         item_count = float(noi)
