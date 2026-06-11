@@ -117,12 +117,12 @@ class SearchService:
                 query = text("""
                     INSERT INTO items (
                         asin, parent_asin, title, link, price, rating, ratings_total,
-                        search_term, search_rank, image_url, last_update,
+                        search_term, search_rank, image_url, rainforest_last_update,
                         title_inferred_item_count, title_inferred_pattern
                     )
                     VALUES (
                         :asin, :parent_asin, :title, :link, :price, :rating, :ratings_total,
-                        :search_term, :search_rank, :image_url, :last_update,
+                        :search_term, :search_rank, :image_url, :rainforest_last_update,
                         :title_inferred_item_count, :title_inferred_pattern
                     )
                     ON DUPLICATE KEY UPDATE
@@ -142,7 +142,7 @@ class SearchService:
                             ELSE LEAST(search_rank, VALUES(search_rank))
                         END,
                         image_url = COALESCE(VALUES(image_url), image_url),
-                        last_update = VALUES(last_update),
+                        rainforest_last_update = VALUES(rainforest_last_update),
                         title_inferred_item_count = VALUES(title_inferred_item_count),
                         title_inferred_pattern = VALUES(title_inferred_pattern),
                         item_count_updated_at = NULL
@@ -158,7 +158,7 @@ class SearchService:
                     "search_term": search_term,
                     "search_rank": search_rank,
                     "image_url": image_url,
-                    "last_update": datetime.datetime.utcnow(),
+                    "rainforest_last_update": datetime.datetime.utcnow(),
                     "title_inferred_item_count": title_fields["title_inferred_item_count"],
                     "title_inferred_pattern": title_fields["title_inferred_pattern"],
                 })

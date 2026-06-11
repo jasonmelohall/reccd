@@ -154,8 +154,8 @@ for term in SEARCH_TERMS:
         WHERE (
             (listed_date IS NULL OR oldest_review IS NULL OR ratings_total IS NULL)
             AND (
-                listed_last_update IS NULL
-                OR listed_last_update < NOW() - INTERVAL 7 DAY
+                keepa_last_update IS NULL
+                OR keepa_last_update < NOW() - INTERVAL 7 DAY
             )
         )
         AND search_term = :term
@@ -231,7 +231,7 @@ for term in SEARCH_TERMS:
                 {rating_clause}
                 {ratings_total_clause}
                 {release_date_clause}
-                listed_last_update = NOW()
+                keepa_last_update = NOW()
             WHERE asin = :asin
         """
 

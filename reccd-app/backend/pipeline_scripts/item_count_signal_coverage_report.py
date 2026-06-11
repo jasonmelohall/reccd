@@ -38,7 +38,7 @@ def main():
                 keepa_updated_at >= UTC_TIMESTAMP() - INTERVAL :days DAY
                 OR rainforest_updated_at >= UTC_TIMESTAMP() - INTERVAL :days DAY
                 OR item_count_updated_at >= UTC_TIMESTAMP() - INTERVAL :days DAY
-                OR last_update >= UTC_TIMESTAMP() - INTERVAL :days DAY
+                OR rainforest_last_update >= UTC_TIMESTAMP() - INTERVAL :days DAY
             )
         """
         params["days"] = args.since_days

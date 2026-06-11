@@ -105,7 +105,7 @@ def load_db_rows(limit: int) -> List[RowMini]:
         SELECT asin, title, price
         FROM items
         WHERE title IS NOT NULL AND title != ''
-        ORDER BY last_update DESC
+        ORDER BY rainforest_last_update DESC
         LIMIT :lim
         """
     )

@@ -228,7 +228,7 @@ try:
     # Calculate frequency only for rows with valid recency_days
     df['frequency'] = np.nan
     df.loc[not_null_mask, 'frequency'] = df.loc[not_null_mask, 'ratings_total'] / (df.loc[not_null_mask, 'recency_days'] + 1)
-    
+
     # Calculate frequency_percentile only for rows with valid frequency
     valid_frequency_mask = df['frequency'].notna()
     df.loc[valid_frequency_mask, 'frequency_percentile'] = (
@@ -306,6 +306,11 @@ try:
     df['release_date'] = df['release_date'].dt.strftime('%Y-%m-%d')
     df['listed_date'] = df['listed_date'].dt.strftime('%Y-%m-%d')
     df['oldest_review'] = df['oldest_review'].dt.strftime('%Y-%m-%d')
+    if 'rainforest_last_update' in df.columns:
+        df['rainforest_last_update'] = (
+            pd.to_datetime(df['rainforest_last_update'], errors='coerce')
+            .dt.strftime('%Y-%m-%d %H:%M')
+        )
 
     # === Display ===
     print("\n=== Search Terms ===\n")
@@ -324,7 +329,7 @@ try:
         'title', 'price', 'item_count', 'price_per_item',
         'rating', 'ratings_total', 'frequency', 'search_rank',
         'listed_date', 'oldest_review', 'release_date', 'reccd', 'asin',
-        'clean_link', 'last_update',
+        'clean_link', 'rainforest_last_update',
     ]
     display_cols = [c for c in display_cols if c in df.columns]
     print(df[display_cols].head(PRINT_ROWS))

@@ -44,7 +44,7 @@ class ProductItem(BaseModel):
     frequency_percentile: Optional[float] = None
     search_rank_percentile: Optional[float] = None
     frequency: Optional[float] = None
-    last_update: Optional[datetime] = None
+    rainforest_last_update: Optional[datetime] = None
     search_terms: Optional[List[str]] = None  # For GenAI: terms that found this item (split from pipe)
 
 
