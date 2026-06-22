@@ -131,15 +131,17 @@ class RecommendationService:
         coefficients, constant = self.load_user_coefficients()
 
         if use_multi:
-            # One search_term per row (the term that returned this result). Match any of the GenAI terms.
-            placeholders = ", ".join([f":term_{i}" for i in range(len(search_terms))])
+            # Match items whose stored search_term contains any GenAI term (same wildcard as regular search).
+            like_clauses = " OR ".join(
+                [f"i.search_term LIKE :pattern_{i}" for i in range(len(search_terms))]
+            )
             params = {"user_id": user_id}
             for i, term in enumerate(search_terms):
-                params[f"term_{i}"] = term
+                params[f"pattern_{i}"] = f"%{term}%"
             query_str = f"""
                 SELECT *
                 FROM items i
-                WHERE i.search_term IN ({placeholders})
+                WHERE ({like_clauses})
                 AND NOT EXISTS (
                     SELECT 1
                     FROM items_user u

@@ -18,9 +18,30 @@ from services.openai_service import generate_search_terms
 from database import get_db_connection
 from sqlalchemy import text
 import datetime
+import json
 import logging
+import time
 
 logger = logging.getLogger(__name__)
+DEBUG_LOG_PATH = "/Users/jasonmelohall/Dropbox/Reccd/make/Reccd/.cursor/debug-502e62.log"
+
+
+def _debug_log(location, message, data, hypothesis_id):
+    # #region agent log
+    try:
+        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps({
+                "sessionId": "502e62",
+                "location": location,
+                "message": message,
+                "data": data,
+                "hypothesisId": hypothesis_id,
+                "timestamp": int(time.time() * 1000),
+                "runId": "pre-fix",
+            }) + "\n")
+    except OSError:
+        pass
+    # #endregion
 router = APIRouter(prefix="/api", tags=["items"])
 
 
@@ -138,12 +159,24 @@ async def get_results(
                 user_id=user_id
             )
             if len(items) == 0 and len(search_terms) > 0:
-                items, coefficients, constant = recommendation_service.get_recommendations(
-                    search_term=search_terms[0],
-                    user_id=user_id
-                )
-                logger.info("GET /results search_terms=%s -> 0 items; fallback search_term=%s -> %s items",
-                            search_terms, search_terms[0], len(items))
+                for term in search_terms:
+                    items, coefficients, constant = recommendation_service.get_recommendations(
+                        search_term=term,
+                        user_id=user_id,
+                    )
+                    if items:
+                        logger.info(
+                            "GET /results search_terms=%s -> 0 items; fallback search_term=%s -> %s items",
+                            search_terms,
+                            term,
+                            len(items),
+                        )
+                        break
+                else:
+                    logger.info(
+                        "GET /results search_terms=%s -> 0 items after per-term fallback",
+                        search_terms,
+                    )
             else:
                 logger.info("GET /results search_terms=%s -> %s items", search_terms, len(items))
             primary = search_terms[0]
@@ -160,6 +193,18 @@ async def get_results(
             logger.info("GET /results search_term=%s -> %s items", search_term, len(items))
             primary = search_term
 
+        _debug_log(
+            "items.py:get_results",
+            "results query complete",
+            {
+                "search_term": search_term,
+                "search_terms": search_terms,
+                "item_count": len(items),
+                "user_id": user_id,
+            },
+            "H1",
+        )
+
         product_items = [ProductItem(**item) for item in items]
         coeffs_dict = {**coefficients, 'constant': constant}
 
@@ -174,6 +219,7 @@ async def get_results(
     except HTTPException:
         raise
     except Exception as e:
+        _debug_log("items.py:get_results", "results error", {"error": str(e)}, "H3")
         logger.error("Results endpoint error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 

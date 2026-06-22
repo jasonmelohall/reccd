@@ -41,7 +41,7 @@ class SimpleRecommendationService:
                 ratings_total,
                 search_rank,
                 release_date,
-                rainforest_last_update
+                last_update
             FROM items
             WHERE search_term LIKE :search_term
             AND title IS NOT NULL

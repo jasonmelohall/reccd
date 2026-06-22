@@ -28,6 +28,24 @@ const PIPELINE_STATUS_MESSAGES = [
   'Almost there—updating every 10 sec…',
 ];
 
+const DEBUG_LOG = (location, message, data, hypothesisId) => {
+  // #region agent log
+  fetch('http://127.0.0.1:7660/ingest/88855c1d-280c-43fa-98a9-14c677e91761', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '502e62' },
+    body: JSON.stringify({
+      sessionId: '502e62',
+      location,
+      message,
+      data,
+      hypothesisId,
+      timestamp: Date.now(),
+      runId: 'pre-fix',
+    }),
+  }).catch(() => {});
+  // #endregion
+};
+
 const formatMoney = (value) => {
   if (value == null || Number.isNaN(Number(value))) return '—';
   return `$${Number(value).toFixed(2)}`;
@@ -74,14 +92,17 @@ const ResultsScreen = ({ route }) => {
       const url = isGenAI
         ? `${API_BASE_URL}/api/results?${searchTerms.map((t) => `search_terms=${encodeURIComponent(t)}`).join('&')}&user_id=${userId}`
         : `${API_BASE_URL}/api/results?search_term=${encodeURIComponent(searchTerm)}&user_id=${userId}`;
+      DEBUG_LOG('ResultsScreen.js:fetchResults', 'fetching results', { url, isGenAI, isPolling, searchTerm, searchTerms }, 'H1');
       const response = await fetch(url);
       const data = await response.json();
 
       if (!response.ok) {
+        DEBUG_LOG('ResultsScreen.js:fetchResults', 'fetch failed', { status: response.status, detail: data?.detail }, 'H3');
         throw new Error(data?.detail || 'Failed to load results');
       }
 
       const newItems = data?.items || [];
+      DEBUG_LOG('ResultsScreen.js:fetchResults', 'fetch succeeded', { itemCount: newItems.length, totalResults: data?.total_results, isPolling }, 'H1');
 
       if (isPolling) pollFailuresRef.current = 0;
       setItems(newItems);
@@ -92,6 +113,7 @@ const ResultsScreen = ({ route }) => {
         }
       }
     } catch (err) {
+      DEBUG_LOG('ResultsScreen.js:fetchResults', 'fetch error', { message: err.message, isPolling }, 'H3');
       if (!isPolling) {
         setError(err.message);
       } else {
@@ -213,13 +235,28 @@ const ResultsScreen = ({ route }) => {
     (item.search_terms && item.search_terms.length > 0)
       ? item.search_terms
       : (item.search_term ? [item.search_term] : []);
-  // GenAI: show item if it has no terms (show all) or its term is selected in pills
-  const visibleItems = isGenAI && Object.keys(selectedPills).length > 0
+  // GenAI: show item if it has no terms, its term is selected, or stored term differs from pills (cached results)
+  const pillKeys = Object.keys(selectedPills);
+  const visibleItems = isGenAI && pillKeys.length > 0
     ? items.filter((item) => {
         const terms = itemTerms(item);
-        return terms.length === 0 || terms.some((t) => selectedPills[t]);
+        if (terms.length === 0) return true;
+        const overlapsPills = terms.some((t) => pillKeys.includes(t));
+        if (!overlapsPills) return true;
+        return terms.some((t) => selectedPills[t]);
       })
     : items;
+
+  useEffect(() => {
+    DEBUG_LOG('ResultsScreen.js:visibleItems', 'computed visible items', {
+      itemsLength: items.length,
+      visibleLength: visibleItems.length,
+      isGenAI,
+      polling,
+      loading,
+      pipelineInProgress: items.length === 0 && polling,
+    }, 'H2');
+  }, [items.length, visibleItems.length, isGenAI, polling, loading]);
 
   const cardContent = (item) => (
     <View style={styles.cardContent}>

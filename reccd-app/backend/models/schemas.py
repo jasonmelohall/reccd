@@ -30,7 +30,7 @@ class ProductItem(BaseModel):
     link: Optional[str] = None  # Allow NULL links
     image_url: Optional[str] = None
     price: Optional[float] = None
-    item_count: Optional[int] = None
+    item_count: Optional[float] = None
     price_per_item: Optional[float] = None
     item_count_percentile: Optional[float] = None
     rating: Optional[float] = None
@@ -44,7 +44,7 @@ class ProductItem(BaseModel):
     frequency_percentile: Optional[float] = None
     search_rank_percentile: Optional[float] = None
     frequency: Optional[float] = None
-    rainforest_last_update: Optional[datetime] = None
+    last_update: Optional[datetime] = None
     search_terms: Optional[List[str]] = None  # For GenAI: terms that found this item (split from pipe)
 
 
