@@ -63,12 +63,19 @@ Edit `.env` file:
 
 ## Deploying to Render (FastAPI Web Service)
 
-- Create a **Web Service** and point it at this repo.
-- Set the **Root Directory** to `backend`.
-- Use `pip install -r requirements.txt` as the Build Command.
-- Use `uvicorn main:app --host 0.0.0.0 --port $PORT` as the Start Command.
-- Add environment variables for `RECCD_DB_URL`, `OPENAI_API_KEY`, `SPOTIFY_CLIENT_ID`, and `SPOTIFY_CLIENT_SECRET`.
-- Add an environment variable `PYTHON_VERSION=3.11.6` so Render installs compatible wheels (avoids compiling `pydantic-core`).
+The backend moved under `reccd-app/backend/` in commit `e16b2be`. **Do not** use root directory `backend` (that path no longer exists at the repo root).
+
+- Create or edit a **Web Service** pointed at this repo (`jasonmelohall/reccd`).
+- Set **Root Directory** to `reccd-app/backend`.
+- **Build Command:** `pip install -r requirements.txt`
+- **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
+- **Health check path:** `/`
+- Add environment variables from your `.env` (`DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`, `RAINFOREST_API_KEY`, `KEEPA_API_KEY`, `OPENAI_API_KEY`, etc.).
+- Set `PYTHON_VERSION=3.11.6` so Render installs compatible wheels (avoids compiling `pydantic-core`).
+
+Alternatively, connect the repo using the root `render.yaml` blueprint (same `rootDir`).
+
+**Common deploy error:** `Root directory 'backend' does not exist` — update Root Directory to `reccd-app/backend` in the Render dashboard, then redeploy from `main` (not an old commit like `e16b2be`).
 
 
 

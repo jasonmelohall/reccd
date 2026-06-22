@@ -1,0 +1,12 @@
+# Render Blueprint — backend API lives under reccd-app/backend (not repo-root backend/).
+services:
+  - type: web
+    name: reccd-web-service
+    runtime: python
+    rootDir: reccd-app/backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.6"
