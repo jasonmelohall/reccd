@@ -37,7 +37,7 @@ def _debug_log(location, message, data, hypothesis_id):
                 "data": data,
                 "hypothesisId": hypothesis_id,
                 "timestamp": int(time.time() * 1000),
-                "runId": "pre-fix",
+                "runId": "post-fix",
             }) + "\n")
     except OSError:
         pass
@@ -86,7 +86,7 @@ async def search_items(request: SearchRequest, background_tasks: BackgroundTasks
             if not search_terms:
                 search_terms = [raw]
             primary = search_terms[0]
-            items, _, _ = recommendation_service.get_recommendations(
+            items, _, _ = recommendation_service.get_recommendations_with_fallback(
                 search_terms=search_terms,
                 user_id=request.user_id
             )
@@ -112,7 +112,7 @@ async def search_items(request: SearchRequest, background_tasks: BackgroundTasks
         st = _sanitize_search_input(request.search_term or "")
         if not st:
             raise HTTPException(status_code=400, detail="search_term required for regular search")
-        items, _, _ = recommendation_service.get_recommendations(
+        items, _, _ = recommendation_service.get_recommendations_with_fallback(
             search_term=st,
             user_id=request.user_id
         )
@@ -154,31 +154,11 @@ async def get_results(
             search_terms = [t for t in search_terms if t]
             if not search_terms:
                 raise HTTPException(status_code=400, detail="search_terms required")
-            items, coefficients, constant = recommendation_service.get_recommendations(
+            items, coefficients, constant = recommendation_service.get_recommendations_with_fallback(
                 search_terms=search_terms,
                 user_id=user_id
             )
-            if len(items) == 0 and len(search_terms) > 0:
-                for term in search_terms:
-                    items, coefficients, constant = recommendation_service.get_recommendations(
-                        search_term=term,
-                        user_id=user_id,
-                    )
-                    if items:
-                        logger.info(
-                            "GET /results search_terms=%s -> 0 items; fallback search_term=%s -> %s items",
-                            search_terms,
-                            term,
-                            len(items),
-                        )
-                        break
-                else:
-                    logger.info(
-                        "GET /results search_terms=%s -> 0 items after per-term fallback",
-                        search_terms,
-                    )
-            else:
-                logger.info("GET /results search_terms=%s -> %s items", search_terms, len(items))
+            logger.info("GET /results search_terms=%s -> %s items", search_terms, len(items))
             primary = search_terms[0]
         else:
             if not search_term:
@@ -186,7 +166,7 @@ async def get_results(
             search_term = _sanitize_search_input(search_term)
             if not search_term:
                 raise HTTPException(status_code=400, detail="search_term required")
-            items, coefficients, constant = recommendation_service.get_recommendations(
+            items, coefficients, constant = recommendation_service.get_recommendations_with_fallback(
                 search_term=search_term,
                 user_id=user_id
             )
@@ -197,7 +177,7 @@ async def get_results(
             "items.py:get_results",
             "results query complete",
             {
-                "search_term": search_term,
+                "search_term": search_term if not search_terms else None,
                 "search_terms": search_terms,
                 "item_count": len(items),
                 "user_id": user_id,

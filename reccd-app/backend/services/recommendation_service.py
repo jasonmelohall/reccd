@@ -18,6 +18,14 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _search_term_suffix_fallbacks(term: str, min_words: int = 2) -> List[str]:
+    """Drop leading words to find related cached results (e.g. 'gold bathroom trash can' -> 'bathroom trash can')."""
+    words = (term or "").split()
+    if len(words) <= min_words:
+        return []
+    return [" ".join(words[i:]) for i in range(1, len(words) - min_words + 1)]
+
+
 class RecommendationService:
     def __init__(self):
         self.user_email = settings.user_email
@@ -291,6 +299,42 @@ class RecommendationService:
             item['search_terms'] = [st] if st else []
 
         return items, coefficients, constant
+
+    def get_recommendations_with_fallback(
+        self,
+        search_term: Optional[str] = None,
+        search_terms: Optional[List[str]] = None,
+        user_id: int = None,
+    ):
+        """Try exact match first, then progressively shorter suffixes for related cached results."""
+        items, coefficients, constant = self.get_recommendations(
+            search_term=search_term,
+            search_terms=search_terms,
+            user_id=user_id,
+        )
+        if items:
+            return items, coefficients, constant
+
+        terms_to_try = list(search_terms) if search_terms else []
+        if search_term and search_term not in terms_to_try:
+            terms_to_try.append(search_term)
+
+        for term in terms_to_try:
+            for fallback in _search_term_suffix_fallbacks(term):
+                items, coefficients, constant = self.get_recommendations(
+                    search_term=fallback,
+                    user_id=user_id,
+                )
+                if items:
+                    logger.info(
+                        "Fallback %r -> %r returned %s items",
+                        term,
+                        fallback,
+                        len(items),
+                    )
+                    return items, coefficients, constant
+
+        return [], coefficients, constant
 
 
 # Global instance
