@@ -319,9 +319,49 @@ _CONTAINER_VOLUME_PATTERN = re.compile(
 )
 
 
+# Reusable totes: L/lb in title is bag capacity or load rating, not net product weight.
+
+
 def _is_container_volume_title(title: str) -> bool:
     """True when oz/L likely describes vessel capacity (rank as 1 each, not $/oz)."""
     return bool(_CONTAINER_VOLUME_PATTERN.search(title))
+
+
+def _is_reusable_bag_each_title(title: str) -> bool:
+    """True for reusable grocery/shopping totes — rank by pack count, not L/lb capacity."""
+    t = title.lower()
+    if re.search(r"\bmoving\s+bags?\b", t):
+        return True
+    if re.search(r"\b(?:grocery|shopping)\s+totes?\b", t):
+        return True
+    if re.search(r"reusable[\s-]+(?:grocery|shopping)[\s-]+bags?\b", t):
+        return True
+    if re.search(r"\breusable\b", t) and re.search(
+        r"\b(?:grocery|shopping)\s+bags?\b",
+        t,
+    ):
+        return True
+    return False
+
+
+def _infer_bag_pack_each_from_title(
+    title: str,
+) -> Tuple[Optional[float], Optional[str]]:
+    """Pack count for reusable bag listings (e.g. '3 Pack ... 35L' -> 3 each)."""
+    if not _is_reusable_bag_each_title(title):
+        return None, None
+
+    for name, pat in _COUNT_PATTERNS:
+        m = pat.search(title)
+        if not m:
+            continue
+        n = int(m.group(1))
+        if _is_seed_bulk_each_count(title, n, name):
+            continue
+        if _MIN_EACH_COUNT <= n <= _MAX_EACH_COUNT:
+            return float(n), f"bag_{name}"
+
+    return None, None
 
 
 def _multipack_count_for_weight_multiply(
@@ -416,7 +456,7 @@ def _infer_weight_ounces_from_title(
     Net product weight in ounces from title.
     When weight and pack/count both appear (e.g. '12 oz Each (2-Pack)'), returns total oz.
     """
-    if _is_container_volume_title(title):
+    if _is_container_volume_title(title) or _is_reusable_bag_each_title(title):
         return None, None
 
     oz_pack = _OZ_PACK_DESCRIPTOR.search(title)
@@ -668,6 +708,7 @@ def infer_quantity_from_title(
     Container capacity (thermos, food jar) is not used as item_count.
     Multipack each-count uses count_type='each'.
     Toilet paper / tissue uses count_type='sheet' (or 'roll' if only roll count known).
+    Reusable grocery/shopping totes use pack count (each), not L/lb capacity.
     """
     if not title or not isinstance(title, str):
         return None, None, None
@@ -680,6 +721,10 @@ def infer_quantity_from_title(
         if sheet_pat == "n_rolls_no_sheet_count":
             return sheet_qty, "roll", sheet_pat
         return sheet_qty, "sheet", sheet_pat
+
+    bag_qty, bag_pat = _infer_bag_pack_each_from_title(title)
+    if bag_qty is not None:
+        return bag_qty, "each", bag_pat
 
     weight_oz, weight_pat = _infer_weight_ounces_from_title(title)
     if weight_oz is not None and weight_pat is not None:
@@ -758,6 +803,9 @@ def apply_item_count_fields_to_dataframe(df):
             df[col] = None
 
     for idx in df.index:
+        source = df.at[idx, "item_count_source"] if "item_count_source" in df.columns else None
+        if source == "manual":
+            continue
         title = df.at[idx, "title"]
         if title is None or (isinstance(title, float) and pd.isna(title)):
             continue
@@ -796,6 +844,32 @@ def _keepa_count_for_merge(value: Any) -> Optional[int]:
     if n is None or n < _MIN_EACH_COUNT:
         return None
     return n
+
+
+_FOOTWEAR_EACH_PATTERN = re.compile(
+    r"\b(?:"
+    r"sandals?|sneakers?|loafers?|moccasins?|boots?|oxfords?|slippers?|"
+    r"flip[- ]?flops?|clogs?|mules?|espadrilles?|footwear|"
+    r"fisherman\s+sandals?"
+    r")\b",
+    re.I,
+)
+
+
+def _is_footwear_each_title(title: Optional[str]) -> bool:
+    if not title:
+        return False
+    return bool(_FOOTWEAR_EACH_PATTERN.search(title))
+
+
+def _normalize_keepa_footwear_pair(
+    title: Optional[str],
+    noi: Optional[int],
+) -> Optional[int]:
+    """Keepa numberOfItems=2 on footwear is left+right; rank price as one pair."""
+    if noi != 2 or not _is_footwear_each_title(title):
+        return None
+    return 1
 
 
 def compute_price_per_item(price: Any, item_count: Any) -> Optional[float]:
@@ -839,9 +913,10 @@ def merge_item_count_signals(
     Priority:
     (1) Title sheet count (toilet paper / tissue)
     (2) Title weight normalized to ounces
-    (3) Keepa multipack each-count
-    (4) Title multipack each-count
-    (5) default item_count=1, count_type=each
+    (3) Title multipack each-count >= 2 (e.g. "3 Pack" beats Keepa when they disagree)
+    (4) Keepa numberOfItems >= 2 (each)
+    (5) Keepa packageQuantity >= 2 (each)
+    (6) default item_count=1, count_type=each
 
     price_per_item is price / item_count ($/sheet, $/oz, $/roll, or $/each).
     """
@@ -873,14 +948,6 @@ def merge_item_count_signals(
         item_count = oz
         count_type = "ounce"
         item_count_source = "title"
-    elif noi is not None and noi <= _MAX_EACH_COUNT:
-        item_count = float(noi)
-        count_type = "each"
-        item_count_source = "keepa"
-    elif pq is not None and pq <= _MAX_EACH_COUNT:
-        item_count = float(pq)
-        count_type = "each"
-        item_count_source = "keepa"
     elif (
         title_qty is not None
         and title_type == "each"
@@ -889,6 +956,18 @@ def merge_item_count_signals(
         item_count = float(title_qty)
         count_type = "each"
         item_count_source = "title"
+    elif (pair_one := _normalize_keepa_footwear_pair(title, noi)) is not None:
+        item_count = float(pair_one)
+        count_type = "each"
+        item_count_source = "keepa"
+    elif noi is not None and noi <= _MAX_EACH_COUNT:
+        item_count = float(noi)
+        count_type = "each"
+        item_count_source = "keepa"
+    elif pq is not None and pq <= _MAX_EACH_COUNT:
+        item_count = float(pq)
+        count_type = "each"
+        item_count_source = "keepa"
 
     return {
         **title_fields,
