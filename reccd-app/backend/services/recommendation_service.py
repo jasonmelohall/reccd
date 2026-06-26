@@ -34,14 +34,14 @@ settings = get_settings()
 _DEBUG_LOG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
     ".cursor",
-    "debug-f9f258.log",
+    "debug-84fc74.log",
 )
 
 
 def _agent_log(hypothesis_id: str, location: str, message: str, data: dict | None = None):
     try:
         payload = {
-            "sessionId": "f9f258",
+            "sessionId": "84fc74",
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
@@ -55,6 +55,29 @@ def _agent_log(hypothesis_id: str, location: str, message: str, data: dict | Non
 
 
 # #endregion
+
+
+def _term_matches_pill(stored: str, pill: str) -> bool:
+    """Bidirectional substring match (mirrors ResultsScreen termMatchesPill)."""
+    if not stored or not pill:
+        return False
+    s, p = str(stored).strip().lower(), str(pill).strip().lower()
+    return s == p or s in p or p in s
+
+
+def _filter_items_matching_genai_terms(
+    items: List[dict], search_terms: List[str]
+) -> List[dict]:
+    if not items or not search_terms:
+        return []
+    return [
+        item
+        for item in items
+        if any(
+            _term_matches_pill(item.get("search_term") or "", pill)
+            for pill in search_terms
+        )
+    ]
 
 
 def _search_term_suffix_fallbacks(term: str, min_words: int = 1) -> List[str]:
@@ -71,19 +94,38 @@ def _fetch_items_genai_wildcard(
     user_id: int,
     wildcard_mode: str = "both_ends",
 ) -> pd.DataFrame:
-    like_conditions = [
-        f"i.search_term LIKE :term_{i}" for i in range(len(search_terms))
-    ]
+    like_conditions = []
     params = {"user_id": user_id}
     for i, term in enumerate(search_terms):
+        like_conditions.append(
+            f"(i.search_term LIKE :term_{i} OR :raw_term_{i} LIKE CONCAT('%', i.search_term, '%'))"
+        )
         params[f"term_{i}"] = search_pattern_for_term(term, wildcard_mode)
+        params[f"raw_term_{i}"] = term
     query_str = f"""
         SELECT *
         FROM items i
         WHERE ({' OR '.join(like_conditions)})
         {ITEMS_IRRELEVANT_EXCLUSION_SQL}
     """
-    return read_items_dataframe(conn, query_str, params)
+    # #region agent log
+    _agent_log(
+        "H1",
+        "recommendation_service._fetch_items_genai_wildcard",
+        "genai_query",
+        {"terms": search_terms, "patterns": {f"term_{i}": params[f"term_{i}"] for i in range(len(search_terms))}},
+    )
+    # #endregion
+    df = read_items_dataframe(conn, query_str, params)
+    # #region agent log
+    _agent_log(
+        "H1",
+        "recommendation_service._fetch_items_genai_wildcard",
+        "genai_query_result",
+        {"row_count": len(df), "sample_terms": df["search_term"].head(5).tolist() if not df.empty and "search_term" in df.columns else []},
+    )
+    # #endregion
+    return df
 
 
 def _fetch_items_like(conn, search_pattern: str, user_id: int) -> pd.DataFrame:
@@ -147,6 +189,14 @@ def get_recommendations(
 
     if df.empty:
         logger.info("No items found for search (term=%s, terms=%s)", search_term, search_terms)
+        # #region agent log
+        _agent_log(
+            "H1",
+            "recommendation_service.get_recommendations",
+            "empty_result",
+            {"search_term": search_term, "search_terms": search_terms, "use_multi": use_multi},
+        )
+        # #endregion
         return [], coefficients, constant
 
     logger.info("Found %s items for search", len(df))
@@ -169,8 +219,44 @@ def get_recommendations_with_fallback(
     if items:
         return items, coefficients, constant
 
-    # Suffix fallbacks are for single-term search only; GenAI lists must match those terms.
     if search_terms:
+        # Suffix fallbacks for GenAI, but keep only items whose stored term matches a pill.
+        for term in search_terms:
+            for fallback in _search_term_suffix_fallbacks(term):
+                fallback_items, coefficients, constant = get_recommendations(
+                    search_term=fallback,
+                    user_id=user_id,
+                )
+                filtered = _filter_items_matching_genai_terms(fallback_items, search_terms)
+                # #region agent log
+                _agent_log(
+                    "H4",
+                    "recommendation_service.get_recommendations_with_fallback",
+                    "genai_fallback_filter",
+                    {
+                        "term": term,
+                        "fallback": fallback,
+                        "raw_count": len(fallback_items),
+                        "filtered_count": len(filtered),
+                    },
+                )
+                # #endregion
+                if filtered:
+                    logger.info(
+                        "GenAI fallback %r -> %r returned %s items after pill filter",
+                        term,
+                        fallback,
+                        len(filtered),
+                    )
+                    return filtered, coefficients, constant
+        # #region agent log
+        _agent_log(
+            "H1",
+            "recommendation_service.get_recommendations_with_fallback",
+            "genai_no_results",
+            {"search_terms": search_terms},
+        )
+        # #endregion
         return [], coefficients, constant
 
     terms_to_try = list(search_terms) if search_terms else []

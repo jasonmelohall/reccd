@@ -90,6 +90,10 @@ const ResultsScreen = ({ route }) => {
 
       const newItems = data?.items || [];
 
+      // #region agent log
+      fetch('http://127.0.0.1:7660/ingest/88855c1d-280c-43fa-98a9-14c677e91761',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84fc74'},body:JSON.stringify({sessionId:'84fc74',location:'ResultsScreen.js:fetchResults',message:'api_response',data:{isGenAI,searchTerms,apiCount:newItems.length,sampleTerms:newItems.slice(0,5).map((i)=>i.search_term||i.search_terms)},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+      // #endregion
+
       if (isPolling) pollFailuresRef.current = 0;
       setItems(newItems);
       if (newItems.length > 0) {
@@ -230,6 +234,12 @@ const ResultsScreen = ({ route }) => {
         )
       )
     : items;
+
+  // #region agent log
+  if (isGenAI && items.length > 0) {
+    fetch('http://127.0.0.1:7660/ingest/88855c1d-280c-43fa-98a9-14c677e91761',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'84fc74'},body:JSON.stringify({sessionId:'84fc74',location:'ResultsScreen.js:visibleItems',message:'filter_counts',data:{apiCount:items.length,visibleCount:visibleItems.length,searchTerms},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+  }
+  // #endregion
 
   const cardContent = (item) => (
     <View style={styles.cardContent}>
