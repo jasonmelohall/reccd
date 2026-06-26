@@ -18,30 +18,9 @@ from services.openai_service import generate_search_terms
 from database import get_db_connection
 from sqlalchemy import text
 import datetime
-import json
 import logging
-import time
 
 logger = logging.getLogger(__name__)
-DEBUG_LOG_PATH = "/Users/jasonmelohall/Dropbox/Reccd/make/Reccd/.cursor/debug-502e62.log"
-
-
-def _debug_log(location, message, data, hypothesis_id):
-    # #region agent log
-    try:
-        with open(DEBUG_LOG_PATH, "a", encoding="utf-8") as log_file:
-            log_file.write(json.dumps({
-                "sessionId": "502e62",
-                "location": location,
-                "message": message,
-                "data": data,
-                "hypothesisId": hypothesis_id,
-                "timestamp": int(time.time() * 1000),
-                "runId": "post-fix",
-            }) + "\n")
-    except OSError:
-        pass
-    # #endregion
 router = APIRouter(prefix="/api", tags=["items"])
 
 
@@ -56,15 +35,18 @@ def run_full_pipeline_background(search_term: Union[str, List[str]]):
     """
     Background task to run the complete items pipeline.
     Accepts a single term (str) or list of terms (GenAI).
-    Takes approximately 5 minutes to complete.
     """
     try:
         logger.info("Starting full pipeline for %s", search_term)
         result = pipeline_service.run_full_pipeline(search_term)
-        if result['status'] == 'completed':
-            logger.info("Pipeline completed successfully")
+        if result["status"] == "completed":
+            logger.info("Pipeline completed successfully for %s", search_term)
         else:
-            logger.error("Pipeline failed: %s", result.get('message'))
+            logger.error(
+                "Pipeline failed for %s: %s",
+                search_term,
+                result.get("message"),
+            )
     except Exception as e:
         logger.error("Pipeline background task failed: %s", e, exc_info=True)
 
@@ -173,18 +155,6 @@ async def get_results(
             logger.info("GET /results search_term=%s -> %s items", search_term, len(items))
             primary = search_term
 
-        _debug_log(
-            "items.py:get_results",
-            "results query complete",
-            {
-                "search_term": search_term if not search_terms else None,
-                "search_terms": search_terms,
-                "item_count": len(items),
-                "user_id": user_id,
-            },
-            "H1",
-        )
-
         product_items = [ProductItem(**item) for item in items]
         coeffs_dict = {**coefficients, 'constant': constant}
 
@@ -199,7 +169,6 @@ async def get_results(
     except HTTPException:
         raise
     except Exception as e:
-        _debug_log("items.py:get_results", "results error", {"error": str(e)}, "H3")
         logger.error("Results endpoint error: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 

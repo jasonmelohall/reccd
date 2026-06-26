@@ -12,7 +12,13 @@ SHARED_DIR = os.path.join(BASE_DIR, "shared")
 sys.path.insert(0, SHARED_DIR)
 
 import reccd_items
-from reccd_items import apply_item_count_fields_to_dataframe, apply_valid_release_dates
+from reccd_items import (
+    apply_exclude_wildcards,
+    apply_wildcards,
+    dedupe_items_by_parent_asin,
+    load_user_coefficients,
+    score_items_dataframe,
+)
 
 # === Configuration ===
 PRINT_ROWS = 21
@@ -35,109 +41,6 @@ EXCLUDE_TERMS = [
 # Get original search terms and apply wildcards
 ORIGINAL_SEARCH_TERMS = reccd_items.get_search_term()
 
-def apply_wildcards(search_terms, mode):
-    """Apply wildcards to search terms based on mode"""
-    if mode == 'both_ends':
-        return [f"%{term}%" for term in search_terms]
-    elif mode == 'start_only':
-        return [f"%{term}" for term in search_terms]
-    elif mode == 'end_only':
-        return [f"{term}%" for term in search_terms]
-    elif mode == 'none':
-        return search_terms
-    else:
-        # Default to both ends if invalid mode
-        return [f"%{term}%" for term in search_terms]
-
-def apply_exclude_wildcards(exclude_terms):
-    """Apply wildcards to exclude terms (always both ends for title matching)"""
-    return [f"%{term}%" for term in exclude_terms]
-
-def load_user_coefficients(engine):
-    """Load user coefficients from database and handle NULL values with fallback logic"""
-    query = text("""
-        SELECT 
-            item_monetary,
-            item_rating,
-            item_recency,
-            item_frequency,
-            item_search
-        FROM user
-        WHERE email = :email
-    """)
-    
-    with engine.connect() as conn:
-        result = conn.execute(query, {"email": EMAIL}).fetchone()
-        
-        if not result:
-            raise ValueError(f"No user found with email {EMAIL}")
-        
-        coefficients = {
-            'price_percentile': result.item_monetary,
-            'rating_percentile': result.item_rating,
-            'release_date_percentile': result.item_recency,
-            'frequency_percentile': result.item_frequency,
-            'search_rank_percentile': result.item_search
-        }
-        
-        # Correct invalid values BEFORE calculating fallbacks
-        if coefficients['frequency_percentile'] is not None and coefficients['frequency_percentile'] < 0:
-            print(
-                f"⚠️  frequency_percentile was negative ({coefficients['frequency_percentile']:.6f}), "
-                "setting to None for fallback calculation"
-            )
-            coefficients['frequency_percentile'] = None
-
-        if coefficients['release_date_percentile'] is not None and coefficients['release_date_percentile'] < 0:
-            print(
-                f"⚠️  release_date_percentile was negative ({coefficients['release_date_percentile']:.6f}), "
-                "setting to None for fallback calculation"
-            )
-            coefficients['release_date_percentile'] = None
-
-        # Get non-NULL and valid coefficients for fallback calculations
-        non_null_coeffs = {k: v for k, v in coefficients.items() if v is not None}
-
-        if not non_null_coeffs:
-            raise ValueError("All coefficients are NULL - cannot calculate fallbacks")
-
-        # Calculate fallback values: half of minimum absolute value of valid coefficients
-        min_abs_value = min(abs(v) for v in non_null_coeffs.values())
-
-        if coefficients['price_percentile'] is None:
-            coefficients['price_percentile'] = -(min_abs_value / 2)
-            print(f"⚠️  price_percentile was NULL, using fallback: {coefficients['price_percentile']:.6f}")
-
-        if coefficients['search_rank_percentile'] is None:
-            coefficients['search_rank_percentile'] = -(min_abs_value / 2)
-            print(f"⚠️  search_rank_percentile was NULL, using fallback: {coefficients['search_rank_percentile']:.6f}")
-
-        if coefficients['rating_percentile'] is None:
-            coefficients['rating_percentile'] = min_abs_value / 2
-            print(f"⚠️  rating_percentile was NULL, using fallback: {coefficients['rating_percentile']:.6f}")
-
-        if coefficients['frequency_percentile'] is None:
-            coefficients['frequency_percentile'] = min_abs_value / 2
-            print(f"⚠️  frequency_percentile was NULL, using fallback: {coefficients['frequency_percentile']:.6f}")
-
-        if coefficients['release_date_percentile'] is None:
-            coefficients['release_date_percentile'] = min_abs_value / 2
-            print(f"⚠️  release_date_percentile was NULL, using fallback: {coefficients['release_date_percentile']:.6f}")
-        
-        # Calculate constant to balance to 1
-        constant = 1 - sum(coefficients.values())
-        
-        print(f"\n=== Loaded User Coefficients ===")
-        print(f"Price (Monetary):     {coefficients['price_percentile']:>10.6f}")
-        print(f"Rating:               {coefficients['rating_percentile']:>10.6f}")
-        print(f"Release Date (Recency): {coefficients['release_date_percentile']:>10.6f}")
-        print(f"Frequency:            {coefficients['frequency_percentile']:>10.6f}")
-        print(f"Search Rank:          {coefficients['search_rank_percentile']:>10.6f}")
-        print(f"Constant:             {constant:>10.6f}")
-        print()
-        
-        return coefficients, constant
-
 # Apply wildcards to search terms and exclude terms
 SEARCH_TERMS_WITH_WILDCARDS = apply_wildcards(ORIGINAL_SEARCH_TERMS, WILDCARD_MODE)
 EXCLUDE_TERMS_WITH_WILDCARDS = apply_exclude_wildcards(EXCLUDE_TERMS)
@@ -146,8 +49,8 @@ EXCLUDE_TERMS_WITH_WILDCARDS = apply_exclude_wildcards(EXCLUDE_TERMS)
 engine = reccd_items.mysqlengine()
 conn = engine.connect()
 
-# Load user coefficients from database
-coefficients, CONSTANT = load_user_coefficients(engine)
+with engine.connect() as coeff_conn:
+    coefficients, CONSTANT = load_user_coefficients(coeff_conn, EMAIL)
 
 # Extract individual weights
 MONETARY_WEIGHT = coefficients['price_percentile']
@@ -156,6 +59,13 @@ ITEM_RECENCY_WEIGHT = coefficients['release_date_percentile']
 ITEM_FREQUENCY_WEIGHT = coefficients['frequency_percentile']
 SEARCH_RANK_WEIGHT = coefficients['search_rank_percentile']
 
+print(f"\n=== Loaded User Coefficients ===")
+print(f"Price (Monetary):     {MONETARY_WEIGHT:>10.6f}")
+print(f"Rating:               {RATING_WEIGHT:>10.6f}")
+print(f"Release Date (Recency): {ITEM_RECENCY_WEIGHT:>10.6f}")
+print(f"Frequency:            {ITEM_FREQUENCY_WEIGHT:>10.6f}")
+print(f"Search Rank:          {SEARCH_RANK_WEIGHT:>10.6f}")
+print(f"Constant:             {CONSTANT:>10.6f}")
 print()
 
 # Pandas display options for single-line printing
@@ -209,94 +119,8 @@ try:
     rows = result.fetchall()
     df = pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
 
-    df = apply_item_count_fields_to_dataframe(df)
-    df = apply_valid_release_dates(df)
-
-    # === Calculate Features ===
-    today = datetime.datetime.now()
-
-    df['recency_days'] = np.nan
-    df.loc[df['release_date'].notna(), 'recency_days'] = (
-        (today - df.loc[df['release_date'].notna(), 'release_date']).dt.days
-    )
-
-    not_null_mask = df['release_date'].notna()
-    df.loc[not_null_mask, 'release_date_percentile'] = (
-        1 - df.loc[not_null_mask, 'recency_days'].rank(pct=True)
-    )
-    
-    # Calculate frequency only for rows with valid recency_days
-    df['frequency'] = np.nan
-    df.loc[not_null_mask, 'frequency'] = df.loc[not_null_mask, 'ratings_total'] / (df.loc[not_null_mask, 'recency_days'] + 1)
-
-    # Calculate frequency_percentile only for rows with valid frequency
-    valid_frequency_mask = df['frequency'].notna()
-    df.loc[valid_frequency_mask, 'frequency_percentile'] = (
-        df.loc[valid_frequency_mask, 'frequency'].rank(pct=True)
-    )
-
-    # Set default values for rows without valid dates
-    df.loc[~not_null_mask, ['release_date_percentile', 'frequency_percentile']] = 1
-
-    monetary_col = df['price_per_item'].fillna(df['price']) if 'price_per_item' in df.columns else df['price']
-    df['price_percentile'] = monetary_col.rank(pct=True)
-    if 'price_per_item' in df.columns:
-        df['item_count_percentile'] = df['price_per_item'].rank(pct=True)
-    df['rating_percentile'] = df['rating'].rank(pct=True)
-    df['search_rank_percentile'] = df['search_rank'].rank(pct=True)
-
-    df['reccd'] = (
-        df['price_percentile'] * MONETARY_WEIGHT +
-        df['rating_percentile'] * RATING_WEIGHT +
-        df['release_date_percentile'] * ITEM_RECENCY_WEIGHT +
-        df['frequency_percentile'] * ITEM_FREQUENCY_WEIGHT +
-        df['search_rank_percentile'] * SEARCH_RANK_WEIGHT +
-        CONSTANT
-    )
-
-    # === Deduplicate by parent_asin ===
-    # If multiple variations of the same parent appear (from different searches),
-    # keep only the one with the best reccd score, best search_rank, and lowest price
-    # BUT: Only deduplicate items that have an actual parent_asin (not NULL/None)
-    # Standalone products (parent_asin is NULL) are kept as-is
-    
-    # Separate items with parent_asin from standalone items
-    # Items with parent_asin are variations that should be deduplicated
-    # Items without parent_asin are standalone products (keep all)
-    has_parent = df['parent_asin'].notna() & (df['parent_asin'] != '')
-    items_with_parent = df[has_parent].copy()
-    standalone_items = df[~has_parent].copy()
-    
-    if len(items_with_parent) > 0:
-        # Prioritize items with complete data (ratings_total not NaN)
-        # Sort by: parent_asin, has_ratings (desc to put True first), reccd (desc), search_rank (asc), price (asc)
-        items_with_parent['has_ratings'] = items_with_parent['ratings_total'].notna()
-        if 'price_per_item' in items_with_parent.columns:
-            items_with_parent['_sort_price'] = items_with_parent['price_per_item'].fillna(
-                items_with_parent['price']
-            )
-        else:
-            items_with_parent['_sort_price'] = items_with_parent['price']
-        items_with_parent = items_with_parent.sort_values(
-            ['parent_asin', 'has_ratings', 'reccd', 'search_rank', '_sort_price'],
-            ascending=[True, False, False, True, True]
-        )
-        items_with_parent = items_with_parent.drop(columns=['_sort_price'], errors='ignore')
-        
-        # Keep first occurrence of each parent (has ratings, best reccd, best rank, best price)
-        items_with_parent = items_with_parent.drop_duplicates(
-            subset=['parent_asin'], 
-            keep='first'
-        )
-        
-        # Drop the temporary column
-        items_with_parent = items_with_parent.drop(columns=['has_ratings'])
-    
-    # Combine deduplicated parent items with standalone items
-    df = pd.concat([items_with_parent, standalone_items], ignore_index=True)
-    
-    # Now sort by reccd for final recommendations
-    df = df.sort_values('reccd', ascending=False).reset_index(drop=True)
+    df = score_items_dataframe(df, coefficients, CONSTANT, score_column="reccd")
+    df = dedupe_items_by_parent_asin(df, score_column="reccd")
 
     df['clean_link'] = df['link'].str.replace(r'\?tag=.*$', '', regex=True)
 

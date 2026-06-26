@@ -8,6 +8,7 @@ Run after Keepa (2) and Rainforest product (3) so raw signals are populated.
 import logging
 import os
 import sys
+import json
 
 from sqlalchemy import text
 
@@ -35,7 +36,31 @@ pending_query = text("""
     FROM items
     WHERE item_count_updated_at IS NULL
 """)
-pending = conn.execute(pending_query).scalar() or 0
+pending_params = {}
+terms_raw = os.environ.get("RECCD_PIPELINE_SEARCH_TERMS")
+pipeline_terms = None
+if terms_raw:
+    try:
+        pipeline_terms = [
+            str(t).strip() for t in json.loads(terms_raw) if str(t).strip()
+        ]
+    except json.JSONDecodeError:
+        pipeline_terms = None
+
+if pipeline_terms:
+    term_clauses = " OR ".join(
+        f"search_term = :term_{i}" for i in range(len(pipeline_terms))
+    )
+    pending_query = text(f"""
+        SELECT COUNT(*) AS n
+        FROM items
+        WHERE item_count_updated_at IS NULL
+        AND ({term_clauses})
+    """)
+    for i, term in enumerate(pipeline_terms):
+        pending_params[f"term_{i}"] = term
+
+pending = conn.execute(pending_query, pending_params).scalar() or 0
 logger.info("Items pending item_count resolution: %s", pending)
 
 if pending == 0:
@@ -56,6 +81,27 @@ select_query = text("""
     WHERE item_count_updated_at IS NULL
     LIMIT :limit
 """)
+select_params = {"limit": BATCH_SIZE}
+
+if pipeline_terms:
+    term_clauses = " OR ".join(
+        f"search_term = :sel_term_{i}" for i in range(len(pipeline_terms))
+    )
+    select_query = text(f"""
+        SELECT
+            asin,
+            title,
+            price,
+            keepa_number_of_items,
+            keepa_package_quantity,
+            rainforest_unit_price_json
+        FROM items
+        WHERE item_count_updated_at IS NULL
+        AND ({term_clauses})
+        LIMIT :limit
+    """)
+    for i, term in enumerate(pipeline_terms):
+        select_params[f"sel_term_{i}"] = term
 
 update_query = text("""
     UPDATE items
@@ -74,7 +120,7 @@ update_query = text("""
 total_updated = 0
 
 while True:
-    rows = conn.execute(select_query, {"limit": BATCH_SIZE}).mappings().all()
+    rows = conn.execute(select_query, select_params).mappings().all()
     if not rows:
         break
 

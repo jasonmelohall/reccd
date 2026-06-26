@@ -28,24 +28,6 @@ const PIPELINE_STATUS_MESSAGES = [
   'Almost there—updating every 10 sec…',
 ];
 
-const DEBUG_LOG = (location, message, data, hypothesisId) => {
-  // #region agent log
-  fetch('http://127.0.0.1:7660/ingest/88855c1d-280c-43fa-98a9-14c677e91761', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '502e62' },
-    body: JSON.stringify({
-      sessionId: '502e62',
-      location,
-      message,
-      data,
-      hypothesisId,
-      timestamp: Date.now(),
-      runId: 'post-fix',
-    }),
-  }).catch(() => {});
-  // #endregion
-};
-
 const formatMoney = (value) => {
   if (value == null || Number.isNaN(Number(value))) return '—';
   return `$${Number(value).toFixed(2)}`;
@@ -92,28 +74,24 @@ const ResultsScreen = ({ route }) => {
       const url = isGenAI
         ? `${API_BASE_URL}/api/results?${searchTerms.map((t) => `search_terms=${encodeURIComponent(t)}`).join('&')}&user_id=${userId}`
         : `${API_BASE_URL}/api/results?search_term=${encodeURIComponent(searchTerm)}&user_id=${userId}`;
-      DEBUG_LOG('ResultsScreen.js:fetchResults', 'fetching results', { url, isGenAI, isPolling, searchTerm, searchTerms }, 'H1');
       const response = await fetch(url);
       const data = await response.json();
 
       if (!response.ok) {
-        DEBUG_LOG('ResultsScreen.js:fetchResults', 'fetch failed', { status: response.status, detail: data?.detail }, 'H3');
         throw new Error(data?.detail || 'Failed to load results');
       }
 
       const newItems = data?.items || [];
-      DEBUG_LOG('ResultsScreen.js:fetchResults', 'fetch succeeded', { itemCount: newItems.length, totalResults: data?.total_results, isPolling }, 'H1');
 
       if (isPolling) pollFailuresRef.current = 0;
       setItems(newItems);
       if (newItems.length > 0) {
         setLastUpdated(new Date());
-        if (isPolling && newItems.length >= 10) {
+        if (isPolling) {
           setPolling(false);
         }
       }
     } catch (err) {
-      DEBUG_LOG('ResultsScreen.js:fetchResults', 'fetch error', { message: err.message, isPolling }, 'H3');
       if (!isPolling) {
         setError(err.message);
       } else {
@@ -246,17 +224,6 @@ const ResultsScreen = ({ route }) => {
         return terms.some((t) => selectedPills[t]);
       })
     : items;
-
-  useEffect(() => {
-    DEBUG_LOG('ResultsScreen.js:visibleItems', 'computed visible items', {
-      itemsLength: items.length,
-      visibleLength: visibleItems.length,
-      isGenAI,
-      polling,
-      loading,
-      pipelineInProgress: items.length === 0 && polling,
-    }, 'H2');
-  }, [items.length, visibleItems.length, isGenAI, polling, loading]);
 
   const cardContent = (item) => (
     <View style={styles.cardContent}>

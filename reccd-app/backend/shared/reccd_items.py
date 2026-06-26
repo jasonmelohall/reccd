@@ -94,7 +94,18 @@ def apply_valid_release_dates(df):
 
 
 def get_search_term() -> List[str]:
-    """Return the default Amazon search terms."""
+    """Return pipeline or default Amazon search terms."""
+    env_terms = os.environ.get("RECCD_PIPELINE_SEARCH_TERMS")
+    if env_terms:
+        try:
+            parsed = json.loads(env_terms)
+            if isinstance(parsed, list):
+                terms = [str(t).strip() for t in parsed if str(t).strip()]
+                if terms:
+                    return terms
+        except json.JSONDecodeError:
+            logger.warning("Invalid RECCD_PIPELINE_SEARCH_TERMS JSON; using file defaults")
+
     list_amazon_search_terms = [
        'white bathroom trash can with lid modern',
        'matte white step trash can small with lid',
@@ -1058,4 +1069,228 @@ def consolidate_parent_items(items_dict: Dict[str, Dict]) -> Dict[str, Dict]:
         parent_map[parent_asin] = best_variation
 
     return parent_map
+
+
+# ===== Item ranking (shared by 9_reccd_items, API recommendation_service) =====
+
+ITEM_COEFFICIENT_KEYS = (
+    "price_percentile",
+    "rating_percentile",
+    "release_date_percentile",
+    "frequency_percentile",
+    "search_rank_percentile",
+)
+
+DEFAULT_ITEM_COEFFICIENTS = {
+    "price_percentile": -0.2,
+    "rating_percentile": 0.3,
+    "release_date_percentile": 0.2,
+    "frequency_percentile": 0.2,
+    "search_rank_percentile": -0.1,
+}
+DEFAULT_ITEM_CONSTANT = 0.4
+
+ITEMS_IRRELEVANT_EXCLUSION_SQL = """
+AND NOT EXISTS (
+    SELECT 1
+    FROM items_user u
+    WHERE u.user_id = :user_id
+    AND u.asin = i.asin
+    AND u.is_relevant = 0
+    AND u.search_term = i.search_term
+)
+""".strip()
+
+
+def apply_wildcards(search_terms, mode: str = "both_ends"):
+    """Apply SQL LIKE wildcards to search terms."""
+    if mode == "both_ends":
+        return [f"%{term}%" for term in search_terms]
+    if mode == "start_only":
+        return [f"%{term}" for term in search_terms]
+    if mode == "end_only":
+        return [f"{term}%" for term in search_terms]
+    if mode == "none":
+        return list(search_terms)
+    return [f"%{term}%" for term in search_terms]
+
+
+def apply_exclude_wildcards(exclude_terms):
+    """Apply wildcards to exclude terms (always both ends for title matching)."""
+    return [f"%{term}%" for term in exclude_terms]
+
+
+def search_pattern_for_term(search_term: str, wildcard_mode: str = "both_ends") -> str:
+    """Build a single LIKE pattern for one search term."""
+    return apply_wildcards([search_term], wildcard_mode)[0]
+
+
+def load_user_coefficients(conn, email: str, *, defaults_if_missing: bool = False):
+    """
+    Load item ranking coefficients from the user table with NULL fallbacks.
+
+    When defaults_if_missing=True (API), missing user or all-NULL coeffs use defaults.
+    Otherwise raises ValueError (pipeline scripts).
+    """
+    from sqlalchemy import text
+
+    query = text(
+        """
+        SELECT
+            item_monetary,
+            item_rating,
+            item_recency,
+            item_frequency,
+            item_search
+        FROM user
+        WHERE email = :email
+        """
+    )
+    result = conn.execute(query, {"email": email}).fetchone()
+
+    if not result:
+        if defaults_if_missing:
+            return dict(DEFAULT_ITEM_COEFFICIENTS), DEFAULT_ITEM_CONSTANT
+        raise ValueError(f"No user found with email {email}")
+
+    coefficients = {
+        "price_percentile": result.item_monetary,
+        "rating_percentile": result.item_rating,
+        "release_date_percentile": result.item_recency,
+        "frequency_percentile": result.item_frequency,
+        "search_rank_percentile": result.item_search,
+    }
+
+    if coefficients["frequency_percentile"] is not None and coefficients["frequency_percentile"] < 0:
+        coefficients["frequency_percentile"] = None
+    if coefficients["release_date_percentile"] is not None and coefficients["release_date_percentile"] < 0:
+        coefficients["release_date_percentile"] = None
+
+    non_null_coeffs = {k: v for k, v in coefficients.items() if v is not None}
+    if not non_null_coeffs:
+        if defaults_if_missing:
+            return dict(DEFAULT_ITEM_COEFFICIENTS), DEFAULT_ITEM_CONSTANT
+        raise ValueError("All coefficients are NULL - cannot calculate fallbacks")
+
+    min_abs_value = min(abs(v) for v in non_null_coeffs.values())
+
+    if coefficients["price_percentile"] is None:
+        coefficients["price_percentile"] = -(min_abs_value / 2)
+    if coefficients["search_rank_percentile"] is None:
+        coefficients["search_rank_percentile"] = -(min_abs_value / 2)
+    if coefficients["rating_percentile"] is None:
+        coefficients["rating_percentile"] = min_abs_value / 2
+    if coefficients["frequency_percentile"] is None:
+        coefficients["frequency_percentile"] = min_abs_value / 2
+    elif coefficients["frequency_percentile"] < 0:
+        coefficients["frequency_percentile"] = min_abs_value / 2
+    if coefficients["release_date_percentile"] is None:
+        coefficients["release_date_percentile"] = abs(min_abs_value) / 2
+    elif coefficients["release_date_percentile"] < 0:
+        coefficients["release_date_percentile"] = abs(min_abs_value) / 2
+
+    constant = 1 - sum(coefficients.values())
+    return coefficients, constant
+
+
+def read_items_dataframe(conn, query_str: str, params: dict):
+    """Execute a SELECT on items and return a DataFrame."""
+    import pandas as pd
+    from sqlalchemy import text
+
+    stmt = text(query_str).bindparams(**params)
+    result = conn.execute(stmt)
+    rows = result.fetchall()
+    return pd.DataFrame(rows, columns=result.keys()) if rows else pd.DataFrame()
+
+
+def score_items_dataframe(df, coefficients: dict, constant: float, *, score_column: str = "reccd"):
+    """Compute percentile features and weighted reccd score in memory."""
+    import datetime
+
+    import numpy as np
+
+    if df is None or df.empty:
+        return df
+
+    df = apply_item_count_fields_to_dataframe(df)
+    df = apply_valid_release_dates(df)
+
+    today = datetime.datetime.now()
+
+    df["recency_days"] = np.nan
+    df.loc[df["release_date"].notna(), "recency_days"] = (
+        today - df.loc[df["release_date"].notna(), "release_date"]
+    ).dt.days
+
+    not_null_mask = df["release_date"].notna()
+    df.loc[not_null_mask, "release_date_percentile"] = (
+        1 - df.loc[not_null_mask, "recency_days"].rank(pct=True)
+    )
+
+    df["frequency"] = np.nan
+    df.loc[not_null_mask, "frequency"] = (
+        df.loc[not_null_mask, "ratings_total"] / (df.loc[not_null_mask, "recency_days"] + 1)
+    )
+
+    valid_frequency_mask = df["frequency"].notna()
+    df.loc[valid_frequency_mask, "frequency_percentile"] = (
+        df.loc[valid_frequency_mask, "frequency"].rank(pct=True)
+    )
+    df.loc[~not_null_mask, ["release_date_percentile", "frequency_percentile"]] = 1
+
+    if "price_per_item" in df.columns:
+        monetary_col = df["price_per_item"].fillna(df["price"])
+        df["item_count_percentile"] = df["price_per_item"].rank(pct=True)
+    else:
+        monetary_col = df["price"]
+    df["price_percentile"] = monetary_col.rank(pct=True)
+    df["rating_percentile"] = df["rating"].rank(pct=True)
+
+    valid_search_rank_mask = df["search_rank"].notna()
+    df.loc[valid_search_rank_mask, "search_rank_percentile"] = (
+        df.loc[valid_search_rank_mask, "search_rank"].rank(pct=True)
+    )
+    df.loc[~valid_search_rank_mask, "search_rank_percentile"] = 1
+
+    df[score_column] = (
+        df["price_percentile"] * coefficients["price_percentile"]
+        + df["rating_percentile"] * coefficients["rating_percentile"]
+        + df["release_date_percentile"] * coefficients["release_date_percentile"]
+        + df["frequency_percentile"] * coefficients["frequency_percentile"]
+        + df["search_rank_percentile"] * coefficients["search_rank_percentile"]
+        + constant
+    )
+    return df
+
+
+def dedupe_items_by_parent_asin(df, *, score_column: str = "reccd"):
+    """Keep one row per parent_asin (best score/rank/price); standalone rows unchanged."""
+    import pandas as pd
+
+    if df is None or df.empty:
+        return df
+
+    has_parent = df["parent_asin"].notna() & (df["parent_asin"] != "")
+    items_with_parent = df[has_parent].copy()
+    standalone_items = df[~has_parent].copy()
+
+    if len(items_with_parent) > 0:
+        if "price_per_item" in items_with_parent.columns:
+            items_with_parent["_sort_price"] = items_with_parent["price_per_item"].fillna(
+                items_with_parent["price"]
+            )
+        else:
+            items_with_parent["_sort_price"] = items_with_parent["price"]
+        items_with_parent["has_ratings"] = items_with_parent["ratings_total"].notna()
+        items_with_parent = items_with_parent.sort_values(
+            ["parent_asin", "has_ratings", score_column, "search_rank", "_sort_price"],
+            ascending=[True, False, False, True, True],
+        )
+        items_with_parent = items_with_parent.drop(columns=["_sort_price"], errors="ignore")
+        items_with_parent = items_with_parent.drop_duplicates(subset=["parent_asin"], keep="first")
+        items_with_parent = items_with_parent.drop(columns=["has_ratings"])
+
+    out = pd.concat([items_with_parent, standalone_items], ignore_index=True)
+    return out.sort_values(score_column, ascending=False).reset_index(drop=True)
 
