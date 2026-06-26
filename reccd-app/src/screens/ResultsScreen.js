@@ -41,6 +41,13 @@ const displayPricePerItem = (item) => {
   return formatMoney(item.price);
 };
 
+const termMatchesPill = (storedTerm, pillTerm) => {
+  if (!storedTerm || !pillTerm) return false;
+  const stored = String(storedTerm).trim().toLowerCase();
+  const pill = String(pillTerm).trim().toLowerCase();
+  return stored === pill || stored.includes(pill) || pill.includes(stored);
+};
+
 const ResultsScreen = ({ route }) => {
   const { searchTerm, searchTerms, userId = 1 } = route.params || {};
   const [items, setItems] = useState([]);
@@ -213,16 +220,15 @@ const ResultsScreen = ({ route }) => {
     (item.search_terms && item.search_terms.length > 0)
       ? item.search_terms
       : (item.search_term ? [item.search_term] : []);
-  // GenAI: show item if it has no terms, its term is selected, or stored term differs from pills (cached results)
+  const itemMatchesPill = (item, pillTerm) =>
+    itemTerms(item).some((t) => termMatchesPill(t, pillTerm));
   const pillKeys = Object.keys(selectedPills);
-  const visibleItems = isGenAI && pillKeys.length > 0
-    ? items.filter((item) => {
-        const terms = itemTerms(item);
-        if (terms.length === 0) return true;
-        const overlapsPills = terms.some((t) => pillKeys.includes(t));
-        if (!overlapsPills) return true;
-        return terms.some((t) => selectedPills[t]);
-      })
+  const visibleItems = isGenAI && searchTerms?.length > 0
+    ? items.filter((item) =>
+        searchTerms.some(
+          (pill) => selectedPills[pill] !== false && itemMatchesPill(item, pill)
+        )
+      )
     : items;
 
   const cardContent = (item) => (
@@ -309,7 +315,7 @@ const ResultsScreen = ({ route }) => {
     );
   }
 
-  const pillCount = (term) => items.filter((item) => itemTerms(item).includes(term)).length;
+  const pillCount = (term) => items.filter((item) => itemMatchesPill(item, term)).length;
 
   const ListHeader = () => (
     <View style={styles.headerContainer}>

@@ -65,17 +65,22 @@ def _search_term_suffix_fallbacks(term: str, min_words: int = 1) -> List[str]:
     return [" ".join(words[i:]) for i in range(1, len(words) - min_words + 1)]
 
 
-def _fetch_items_genai_exact(conn, search_terms: List[str], user_id: int) -> pd.DataFrame:
-    exact_clauses = " OR ".join(
-        [f"i.search_term = :term_{i}" for i in range(len(search_terms))]
-    )
+def _fetch_items_genai_wildcard(
+    conn,
+    search_terms: List[str],
+    user_id: int,
+    wildcard_mode: str = "both_ends",
+) -> pd.DataFrame:
+    like_conditions = [
+        f"i.search_term LIKE :term_{i}" for i in range(len(search_terms))
+    ]
     params = {"user_id": user_id}
     for i, term in enumerate(search_terms):
-        params[f"term_{i}"] = term
+        params[f"term_{i}"] = search_pattern_for_term(term, wildcard_mode)
     query_str = f"""
         SELECT *
         FROM items i
-        WHERE ({exact_clauses})
+        WHERE ({' OR '.join(like_conditions)})
         {ITEMS_IRRELEVANT_EXCLUSION_SQL}
     """
     return read_items_dataframe(conn, query_str, params)
@@ -135,7 +140,7 @@ def get_recommendations(
             conn, settings.user_email, defaults_if_missing=True
         )
         if use_multi:
-            df = _fetch_items_genai_exact(conn, search_terms, user_id)
+            df = _fetch_items_genai_wildcard(conn, search_terms, user_id, wildcard_mode)
         else:
             pattern = search_pattern_for_term(search_term, wildcard_mode)
             df = _fetch_items_like(conn, pattern, user_id)
@@ -163,6 +168,10 @@ def get_recommendations_with_fallback(
     )
     if items:
         return items, coefficients, constant
+
+    # Suffix fallbacks are for single-term search only; GenAI lists must match those terms.
+    if search_terms:
+        return [], coefficients, constant
 
     terms_to_try = list(search_terms) if search_terms else []
     if search_term and search_term not in terms_to_try:
