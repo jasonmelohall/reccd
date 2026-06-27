@@ -65,19 +65,93 @@ def _term_matches_pill(stored: str, pill: str) -> bool:
     return s == p or s in p or p in s
 
 
+GENAI_MODIFIER_STOP = frozenset(
+    {
+        "sustainable",
+        "durable",
+        "eco-friendly",
+        "eco",
+        "friendly",
+        "natural",
+        "organic",
+        "long-lasting",
+        "long",
+        "lasting",
+        "the",
+        "a",
+        "an",
+        "and",
+    }
+)
+GENAI_GENERIC_PRODUCT_WORDS = frozenset(
+    {"exfoliator", "exfoliating", "sponge", "scrubber", "scrub", "body"}
+)
+LIP_CATEGORY_MARKERS = frozenset({"lip", "lips", "lipstick"})
+
+
+def _lip_category_mismatch(combined_lower: str, pill_lower: str) -> bool:
+    """Exclude lip/cosmetic items when GenAI pills target shower/body."""
+    if not any(marker in combined_lower for marker in LIP_CATEGORY_MARKERS):
+        return False
+    if "shower" in pill_lower or "body" in pill_lower:
+        return "shower" not in combined_lower and "body" not in combined_lower
+    return False
+
+
+def _pill_content_tokens(pill: str) -> List[str]:
+    return [
+        w
+        for w in pill.strip().lower().split()
+        if w not in GENAI_MODIFIER_STOP and len(w) > 2
+    ]
+
+
+def _item_matches_genai_pill(
+    item: dict,
+    pill: str,
+    *,
+    query_term: Optional[str] = None,
+) -> bool:
+    stored = (item.get("search_term") or "").strip()
+    title = (item.get("title") or "").strip()
+    combined = f"{stored} {title}".lower()
+    pill_lower = pill.strip().lower()
+
+    if stored and _term_matches_pill(stored, pill_lower):
+        return not _lip_category_mismatch(combined, pill_lower)
+
+    if not query_term or not _term_matches_pill(query_term, pill_lower):
+        return False
+
+    tokens = _pill_content_tokens(pill)
+    if not tokens:
+        return False
+    distinctive = [t for t in tokens if t not in GENAI_GENERIC_PRODUCT_WORDS]
+    check_tokens = distinctive if distinctive else tokens
+    if not any(token in combined for token in check_tokens):
+        return False
+    return not _lip_category_mismatch(combined, pill_lower)
+
+
 def _filter_items_matching_genai_terms(
-    items: List[dict], search_terms: List[str]
+    items: List[dict],
+    search_terms: List[str],
+    *,
+    query_term: Optional[str] = None,
 ) -> List[dict]:
     if not items or not search_terms:
         return []
-    return [
-        item
-        for item in items
-        if any(
-            _term_matches_pill(item.get("search_term") or "", pill)
-            for pill in search_terms
-        )
-    ]
+    matched: List[dict] = []
+    for item in items:
+        for pill in search_terms:
+            if _item_matches_genai_pill(item, pill, query_term=query_term):
+                out = dict(item)
+                label = out.get("search_term") or pill
+                out["search_term"] = label
+                out["search_terms"] = [label]
+                matched.append(out)
+                break
+    return matched
 
 
 def _search_term_suffix_fallbacks(term: str, min_words: int = 1) -> List[str]:
@@ -227,7 +301,12 @@ def get_recommendations_with_fallback(
                     search_term=fallback,
                     user_id=user_id,
                 )
-                filtered = _filter_items_matching_genai_terms(fallback_items, search_terms)
+                filtered = _filter_items_matching_genai_terms(
+                    fallback_items, search_terms, query_term=fallback
+                )
+                sample_stored = [
+                    i.get("search_term") for i in fallback_items[:5]
+                ]
                 # #region agent log
                 _agent_log(
                     "H4",
@@ -238,6 +317,10 @@ def get_recommendations_with_fallback(
                         "fallback": fallback,
                         "raw_count": len(fallback_items),
                         "filtered_count": len(filtered),
+                        "sample_stored_terms": sample_stored,
+                        "sample_titles": [
+                            (i.get("title") or "")[:60] for i in fallback_items[:3]
+                        ],
                     },
                 )
                 # #endregion
