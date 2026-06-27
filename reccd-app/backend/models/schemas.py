@@ -45,7 +45,8 @@ class ProductItem(BaseModel):
     search_rank_percentile: Optional[float] = None
     frequency: Optional[float] = None
     last_update: Optional[datetime] = None
-    search_terms: Optional[List[str]] = None  # For GenAI: terms that found this item (split from pipe)
+    search_term: Optional[str] = None
+    search_terms: Optional[List[str]] = None  # For GenAI: terms that found this item
 
 
 class ResultsResponse(BaseModel):
