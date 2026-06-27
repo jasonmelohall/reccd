@@ -2,15 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import requests
-import datetime
 import logging
-from sqlalchemy import text
 from database import get_db_connection
 from config import get_settings
 from shared.reccd_items import (
     get_parent_asin_from_rainforest,
     consolidate_parent_items,
-    title_inference_fields,
+    save_rainforest_search_batch,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,102 +68,15 @@ class SearchService:
         }
     
     def save_items_batch(self, consolidated_items):
-        """Save a batch of consolidated parent items to database with images"""
+        """Save consolidated parent items via shared items/11 upsert."""
         with get_db_connection() as conn:
-            saved_count = 0
-            
-            for parent_asin, item_data in consolidated_items.items():
-                asin = item_data['asin']  # This is now the parent ASIN
-                title = item_data['title']
-                price = item_data['price']
-                rating = item_data['rating']
-                ratings_total = item_data['ratings_total']
-                search_term = item_data['search_term']
-                search_rank = item_data['search_rank']
-                parent_asin_field = item_data['parent_asin']
-                image_url = item_data.get('image_url')  # Use Rainforest API image URL directly
-                
-                # For standalone products (parent_asin == asin), store NULL in parent_asin column
-                if parent_asin_field == asin:
-                    parent_asin_field = None
-                
-                # Generate link using parent ASIN
-                link = f"https://www.amazon.com/dp/{asin}?tag={self.associate_tag}"
-                
-                # Check for duplicate
-                duplicate_query = text("""
-                    SELECT asin FROM items
-                    WHERE price = :price
-                      AND rating = :rating
-                      AND ratings_total = :ratings_total
-                      AND search_term = :search_term
-                    LIMIT 1
-                """)
-                result = conn.execute(duplicate_query, {
-                    "price": price,
-                    "rating": rating,
-                    "ratings_total": ratings_total,
-                    "search_term": search_term
-                }).fetchone()
-                
-                if result:
-                    logger.info(f"Skipping duplicate item: {title}")
-                    continue
-                
-                title_fields = title_inference_fields(title)
-
-                query = text("""
-                    INSERT INTO items (
-                        asin, parent_asin, title, link, price, rating, ratings_total,
-                        search_term, search_rank, image_url, last_update,
-                        title_inferred_item_count, title_inferred_pattern
-                    )
-                    VALUES (
-                        :asin, :parent_asin, :title, :link, :price, :rating, :ratings_total,
-                        :search_term, :search_rank, :image_url, :last_update,
-                        :title_inferred_item_count, :title_inferred_pattern
-                    )
-                    ON DUPLICATE KEY UPDATE
-                        title = IF(COALESCE(VALUES(ratings_total), 0) >= COALESCE(ratings_total, 0), VALUES(title), title),
-                        link = VALUES(link),
-                        price = IF(COALESCE(VALUES(ratings_total), 0) >= COALESCE(ratings_total, 0), VALUES(price), price),
-                        rating = IF(COALESCE(VALUES(ratings_total), 0) >= COALESCE(ratings_total, 0), VALUES(rating), rating),
-                        ratings_total = CASE 
-                            WHEN ratings_total IS NULL THEN VALUES(ratings_total)
-                            WHEN VALUES(ratings_total) IS NULL THEN ratings_total
-                            ELSE GREATEST(ratings_total, VALUES(ratings_total))
-                        END,
-                        search_term = VALUES(search_term),
-                        search_rank = CASE 
-                            WHEN search_rank IS NULL THEN VALUES(search_rank)
-                            WHEN VALUES(search_rank) IS NULL THEN search_rank
-                            ELSE LEAST(search_rank, VALUES(search_rank))
-                        END,
-                        image_url = COALESCE(VALUES(image_url), image_url),
-                        last_update = VALUES(last_update),
-                        title_inferred_item_count = VALUES(title_inferred_item_count),
-                        title_inferred_pattern = VALUES(title_inferred_pattern),
-                        item_count_updated_at = NULL
-                """)
-                conn.execute(query, {
-                    "asin": asin,
-                    "parent_asin": parent_asin_field,
-                    "title": title,
-                    "link": link,
-                    "price": price,
-                    "rating": rating,
-                    "ratings_total": ratings_total,
-                    "search_term": search_term,
-                    "search_rank": search_rank,
-                    "image_url": image_url,
-                    "last_update": datetime.datetime.utcnow(),
-                    "title_inferred_item_count": title_fields["title_inferred_item_count"],
-                    "title_inferred_pattern": title_fields["title_inferred_pattern"],
-                })
-                saved_count += 1
-            
-            conn.commit()
-            logger.info(f"Saved {saved_count} parent items to database")
+            save_rainforest_search_batch(
+                conn,
+                consolidated_items,
+                associate_tag=self.associate_tag,
+            )
+            saved_count = len(consolidated_items)
+            logger.info("Saved %s parent items to database", saved_count)
             return saved_count
     
     def perform_search(self, search_term: str, max_pages: int = 2):

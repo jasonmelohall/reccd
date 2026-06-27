@@ -1071,6 +1071,75 @@ def consolidate_parent_items(items_dict: Dict[str, Dict]) -> Dict[str, Dict]:
     return parent_map
 
 
+def save_rainforest_search_batch(conn, consolidated_items, *, associate_tag: str = "reccd-20"):
+    """
+    Upsert parent-consolidated Rainforest search rows into items.
+    Same SQL as items/11_search_items_rainforest.py save_items_batch.
+    """
+    from sqlalchemy import text
+
+    query = text("""
+        INSERT INTO items (
+            asin, parent_asin, title, link, price, rating, ratings_total,
+            search_term, search_rank, image_url, rainforest_last_update,
+            title_inferred_item_count, title_inferred_count_type, title_inferred_pattern
+        )
+        VALUES (
+            :asin, :parent_asin, :title, :link, :price, :rating, :ratings_total,
+            :search_term, :search_rank, :image_url, :rainforest_last_update,
+            :title_inferred_item_count, :title_inferred_count_type, :title_inferred_pattern
+        )
+        ON DUPLICATE KEY UPDATE
+            title = VALUES(title),
+            link = VALUES(link),
+            price = VALUES(price),
+            rating = VALUES(rating),
+            ratings_total = VALUES(ratings_total),
+            search_term = VALUES(search_term),
+            search_rank = CASE
+                WHEN search_rank IS NULL THEN VALUES(search_rank)
+                WHEN VALUES(search_rank) IS NULL THEN search_rank
+                ELSE LEAST(search_rank, VALUES(search_rank))
+            END,
+            image_url = COALESCE(VALUES(image_url), image_url),
+            rainforest_last_update = VALUES(rainforest_last_update),
+            title_inferred_item_count = VALUES(title_inferred_item_count),
+            title_inferred_count_type = VALUES(title_inferred_count_type),
+            title_inferred_pattern = VALUES(title_inferred_pattern),
+            item_count_updated_at = NULL
+    """)
+
+    for _parent_asin, item_data in consolidated_items.items():
+        asin = item_data["asin"]
+        parent_asin_field = item_data.get("parent_asin")
+        if parent_asin_field == asin:
+            parent_asin_field = None
+
+        title = item_data["title"]
+        title_fields = title_inference_fields(title)
+        conn.execute(
+            query,
+            {
+                "asin": asin,
+                "parent_asin": parent_asin_field,
+                "title": title,
+                "link": f"https://www.amazon.com/dp/{asin}?tag={associate_tag}",
+                "price": item_data.get("price"),
+                "rating": item_data.get("rating"),
+                "ratings_total": item_data.get("ratings_total"),
+                "search_term": item_data["search_term"],
+                "search_rank": item_data["search_rank"],
+                "image_url": item_data.get("image_url"),
+                "rainforest_last_update": datetime.utcnow(),
+                "title_inferred_item_count": title_fields["title_inferred_item_count"],
+                "title_inferred_count_type": title_fields["title_inferred_count_type"],
+                "title_inferred_pattern": title_fields["title_inferred_pattern"],
+            },
+        )
+
+    conn.commit()
+
+
 # ===== Item ranking (shared by 9_reccd_items, API recommendation_service) =====
 
 ITEM_COEFFICIENT_KEYS = (
