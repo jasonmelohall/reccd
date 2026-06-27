@@ -192,16 +192,17 @@ def save_items_batch(consolidated_items):
         
         title_fields = title_inference_fields(title)
 
+        # Match search_service.py INSERT — production items table may lack title_inferred_count_type.
         query = text("""
             INSERT INTO items (
                 asin, parent_asin, title, link, price, rating, ratings_total,
                 search_term, search_rank, image_url, last_update,
-                title_inferred_item_count, title_inferred_count_type, title_inferred_pattern
+                title_inferred_item_count, title_inferred_pattern
             )
             VALUES (
                 :asin, :parent_asin, :title, :link, :price, :rating, :ratings_total,
                 :search_term, :search_rank, :image_url, :last_update,
-                :title_inferred_item_count, :title_inferred_count_type, :title_inferred_pattern
+                :title_inferred_item_count, :title_inferred_pattern
             )
             ON DUPLICATE KEY UPDATE
                 title = IF(COALESCE(VALUES(ratings_total), 0) >= COALESCE(ratings_total, 0), VALUES(title), title),
@@ -222,26 +223,47 @@ def save_items_batch(consolidated_items):
                 image_url = COALESCE(VALUES(image_url), image_url),
                 last_update = VALUES(last_update),
                 title_inferred_item_count = VALUES(title_inferred_item_count),
-                title_inferred_count_type = VALUES(title_inferred_count_type),
                 title_inferred_pattern = VALUES(title_inferred_pattern),
                 item_count_updated_at = NULL
         """)
-        conn.execute(query, {
-            "asin": asin,
-            "parent_asin": parent_asin_field,
-            "title": title,
-            "link": link,
-            "price": price,
-            "rating": rating,
-            "ratings_total": ratings_total,
-            "search_term": search_term,
-            "search_rank": search_rank,
-            "image_url": image_url,
-            "last_update": datetime.datetime.utcnow(),
-            "title_inferred_item_count": title_fields["title_inferred_item_count"],
-            "title_inferred_count_type": title_fields["title_inferred_count_type"],
-            "title_inferred_pattern": title_fields["title_inferred_pattern"],
-        })
+        try:
+            conn.execute(query, {
+                "asin": asin,
+                "parent_asin": parent_asin_field,
+                "title": title,
+                "link": link,
+                "price": price,
+                "rating": rating,
+                "ratings_total": ratings_total,
+                "search_term": search_term,
+                "search_rank": search_rank,
+                "image_url": image_url,
+                "last_update": datetime.datetime.utcnow(),
+                "title_inferred_item_count": title_fields["title_inferred_item_count"],
+                "title_inferred_pattern": title_fields["title_inferred_pattern"],
+            })
+        except Exception as exc:
+            # #region agent log
+            try:
+                _log_path = os.path.join(
+                    os.path.dirname(os.path.dirname(BASE_DIR)),
+                    ".cursor",
+                    "debug-84fc74.log",
+                )
+                with open(_log_path, "a", encoding="utf-8") as _fh:
+                    _fh.write(json.dumps({
+                        "sessionId": "84fc74",
+                        "hypothesisId": "A",
+                        "location": "1_search_items_rainforest.save_items_batch",
+                        "message": "insert_failed",
+                        "data": {"asin": asin, "error": str(exc), "search_term": search_term},
+                        "timestamp": int(time.time() * 1000),
+                        "runId": "post-fix",
+                    }) + "\n")
+            except OSError:
+                pass
+            # #endregion
+            raise
     
     conn.commit()
     logging.info(f"✅ Saved {len(consolidated_items)} parent items to database")

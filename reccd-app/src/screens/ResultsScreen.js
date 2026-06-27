@@ -93,8 +93,14 @@ const ResultsScreen = ({ route }) => {
       if (isPolling) pollFailuresRef.current = 0;
       setItems(newItems);
       if (newItems.length > 0) {
+        emptyPollsRef.current = 0;
         setLastUpdated(new Date());
         if (isPolling) {
+          setPolling(false);
+        }
+      } else if (isPolling) {
+        emptyPollsRef.current += 1;
+        if (emptyPollsRef.current >= MAX_EMPTY_POLLS) {
           setPolling(false);
         }
       }
@@ -118,7 +124,9 @@ const ResultsScreen = ({ route }) => {
   const fetchResultsRef = useRef(fetchResults);
   fetchResultsRef.current = fetchResults;
   const pollFailuresRef = useRef(0);
+  const emptyPollsRef = useRef(0);
   const POLL_FAILURES_BEFORE_ERROR = 2;
+  const MAX_EMPTY_POLLS = 12;
 
   useEffect(() => {
     if (isGenAI && searchTerms?.length) {

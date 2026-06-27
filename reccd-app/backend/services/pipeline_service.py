@@ -33,14 +33,14 @@ _NON_FATAL_SCRIPTS = frozenset({"32_item_count_resolution.py"})
 _DEBUG_LOG_PATH = os.path.join(
     os.path.dirname(os.path.dirname(BASE_DIR)),
     ".cursor",
-    "debug-f9f258.log",
+    "debug-84fc74.log",
 )
 
 
 def _agent_log(hypothesis_id: str, location: str, message: str, data: dict | None = None):
     try:
         payload = {
-            "sessionId": "f9f258",
+            "sessionId": "84fc74",
             "hypothesisId": hypothesis_id,
             "location": location,
             "message": message,
