@@ -230,7 +230,13 @@ const ResultsScreen = ({ route }) => {
       : (item.search_term ? [item.search_term] : []);
   const itemMatchesPill = (item, pillTerm) =>
     itemTerms(item).some((t) => termMatchesPill(t, pillTerm));
-  const visibleItems = items;
+  const visibleItems = isGenAI && searchTerms?.length > 0
+    ? items.filter((item) =>
+        searchTerms.some(
+          (pill) => selectedPills[pill] !== false && itemMatchesPill(item, pill)
+        )
+      )
+    : items;
 
   const cardContent = (item) => (
     <View style={styles.cardContent}>
@@ -335,7 +341,12 @@ const ResultsScreen = ({ route }) => {
               <TouchableOpacity
                 key={term}
                 style={[styles.pill, selected && styles.pillSelected]}
-                onPress={() => setSelectedPills((prev) => ({ ...prev, [term]: !prev[term] }))}
+                onPress={() =>
+                  setSelectedPills((prev) => ({
+                    ...prev,
+                    [term]: prev[term] === false,
+                  }))
+                }
               >
                 <Text style={[styles.pillText, selected && styles.pillTextSelected]} numberOfLines={1}>
                   {term} ({count})
@@ -376,6 +387,8 @@ const ResultsScreen = ({ route }) => {
                 </>
               ) : showEmptyState ? (
                 <Text style={styles.empty}>No results yet. Pull to refresh.</Text>
+              ) : items.length > 0 ? (
+                <Text style={styles.empty}>No results for selected filters.</Text>
               ) : null}
             </View>
           ) : (
@@ -417,6 +430,8 @@ const ResultsScreen = ({ route }) => {
               </>
             ) : showEmptyState ? (
               <Text style={styles.empty}>No results yet. Pull to refresh.</Text>
+            ) : items.length > 0 ? (
+              <Text style={styles.empty}>No results for selected filters.</Text>
             ) : null}
           </View>
         }
@@ -449,13 +464,14 @@ const styles = StyleSheet.create({
   },
   webContainer: {
     flex: 1,
+    minHeight: 0,
     backgroundColor: '#F7FAFC',
-    height: '100vh',
     width: '100%',
   },
   webScrollView: {
     flex: 1,
-    height: '100%',
+    minHeight: 0,
+    overflow: 'auto',
   },
   centered: {
     flex: 1,
