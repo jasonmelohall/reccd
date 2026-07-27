@@ -138,7 +138,7 @@ const SearchScreen = ({ navigation }) => {
           <>
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Describe what you need in a few lines... e.g. Wireless headphones with noise cancelling, comfortable for travel, under $100"
+              placeholder="Describe what you need in a few lines... e.g. Wireless headphones with noise canceling, comfortable for planes"
               value={userInput}
               onChangeText={setUserInput}
               multiline
