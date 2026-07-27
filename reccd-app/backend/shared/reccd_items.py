@@ -324,7 +324,18 @@ _CONTAINER_VOLUME_PATTERN = re.compile(
     r"food\s+storage\s+container|storage\s+container|food\s+container|"
     r"lunch\s+box|lunch\s+container|lunch\s+jar|lunch\s+tin|"
     r"meal\s+prep\s+tin|meal\s+prep\s+container|bento\b|"
-    r"hydrapeak|stanley\b|energify"
+    r"hydrapeak|stanley\b|energify|"
+    # Soap / lotion dispensers: "12 oz" is bottle capacity, not consumable volume.
+    r"(?:foaming\s+|foam\s+|hand\s+|kitchen\s+|bathroom\s+|touchless\s+|automatic\s+)?"
+    r"(?:soap|lotion)\s+dispenser|"
+    r"soap\s+dispenser|lotion\s+dispenser|foam\s+pump|"
+    # Pet waterers / fountains: L/oz is reservoir capacity.
+    r"(?:dog|pet|cat)\s+water(?:er|bowl| bowl|fountain| fountain)|"
+    r"(?:automatic\s+)?(?:dog|pet|cat)\s+waterer|"
+    r"(?:dog|pet|cat)\s+water\s+bowl(?:\s+dispenser)?|"
+    r"(?:dog|pet|cat)\s+water\s+fountain|"
+    r"automatic\s+(?:pet\s+)?waterer|pet\s+fountain|"
+    r"water\s+bowl\s+dispenser"
     r")\b",
     re.I,
 )
@@ -419,6 +430,13 @@ _OZ_PACK_DESCRIPTOR = re.compile(
     re.I,
 )
 
+# "(2LBS/16oz bags)" with "2 Pack" — oz is per bag; lb is total pack weight (not × pack again).
+_LB_SLASH_OZ_BAGS = re.compile(
+    r"\(\s*(\d+(?:\.\d+)?)\s*(?:lb|lbs|pound|pounds)\s*/\s*"
+    r"(\d+(?:\.\d+)?)\s*(?:oz|ounce|ounces)\s+bags?\s*\)",
+    re.I,
+)
+
 _WEIGHT_EACH_PATTERNS: Sequence[Tuple[str, re.Pattern, str]] = (
     (
         "n_fl_oz_each",
@@ -481,6 +499,20 @@ def _infer_weight_ounces_from_title(
             if _MIN_WEIGHT_OZ <= oz <= _MAX_WEIGHT_OZ:
                 return oz, "n_oz_pack_descriptor"
 
+    lb_oz_bags = _LB_SLASH_OZ_BAGS.search(title)
+    if lb_oz_bags:
+        try:
+            oz_per_bag = float(lb_oz_bags.group(2))
+        except (TypeError, ValueError):
+            oz_per_bag = None
+        if oz_per_bag is not None:
+            pack_n = _multipack_count_for_weight_multiply(
+                title, per_unit_is_each=False
+            ) or 1
+            total_oz = round(oz_per_bag * pack_n, 4)
+            if _MIN_WEIGHT_OZ <= total_oz <= _MAX_WEIGHT_OZ:
+                return total_oz, "n_lb_slash_oz_bags"
+
     n_x_m = _N_X_WEIGHT_PATTERN.search(title)
     if n_x_m:
         try:
@@ -516,6 +548,10 @@ def _infer_weight_ounces_from_title(
         for name, pat, raw_unit in _WEIGHT_PATTERNS:
             m = pat.search(title)
             if not m:
+                continue
+            if name in ("n_lb", "frac_lb", "n_lb_each") and _is_paper_basis_weight_match(
+                title, m
+            ):
                 continue
             qty = _parse_weight_quantity(m, name)
             if qty is None:
@@ -579,7 +615,19 @@ def _weight_to_ounces(qty: float, raw_unit: str) -> float:
 
 
 _SHEET_PRODUCT_HINT = re.compile(
-    r"\b(?:toilet\s+paper|bath\s+tissue|facial\s+tissue|paper\s+towels?|tp\b)\b",
+    r"\b(?:"
+    r"toilet\s+paper|bath\s+tissue|facial\s+tissue|paper\s+towels?|tp\b|"
+    r"sketch\s*books?|sketch\s*pads?|drawing\s+pads?|drawing\s+paper|"
+    r"art\s+paper|watercolor\s+paper|mixed\s+media\s+paper|"
+    r"copy\s+paper|printer\s+paper|notebook\s+paper|cardstock|"
+    r"acid[- ]free\s+(?:drawing\s+)?paper"
+    r")\b",
+    re.I,
+)
+
+# Paper basis weight (e.g. "68lb/100gsm"), not product net weight.
+_PAPER_BASIS_WEIGHT = re.compile(
+    r"\b\d+(?:\.\d+)?\s*(?:lb|lbs)\s*/\s*\d+(?:\.\d+)?\s*gsm\b",
     re.I,
 )
 
@@ -589,6 +637,17 @@ _MAX_SHEET_COUNT = 50000
 
 def _has_sheet_product_context(title: str) -> bool:
     return bool(_SHEET_PRODUCT_HINT.search(title))
+
+
+def _is_paper_basis_weight_match(title: str, match: re.Match) -> bool:
+    """True when an lb match is paper gsm basis weight, not edible/product weight."""
+    if _PAPER_BASIS_WEIGHT.search(title):
+        span = title[match.start() : min(len(title), match.end() + 24)]
+        if re.search(r"(?:lb|lbs)\s*/\s*\d", span, re.I):
+            return True
+        if re.search(r"\bgsm\b", title[match.start() : match.end() + 40], re.I):
+            return True
+    return bool(re.search(r"\bgsm\b", title[match.start() : match.end() + 40], re.I))
 
 
 def _rolls_in_title(title: str) -> Optional[re.Match]:
@@ -666,6 +725,13 @@ def _infer_sheet_count_from_title(title: str) -> Tuple[Optional[float], Optional
             n = int(m.group(1))
             if _MIN_SHEET_COUNT <= n <= _MAX_SHEET_COUNT:
                 return float(n), "n_sheet_count"
+
+    # Sketch pads / drawing paper / TP without rolls: "100 Sheets"
+    if not rolls_m:
+        for m in re.finditer(r"\b(\d{2,5})\s+sheets?\b", title, re.I):
+            n = int(m.group(1))
+            if _MIN_SHEET_COUNT <= n <= _MAX_SHEET_COUNT:
+                return float(n), "n_bare_sheets"
 
     if rolls_m:
         n = int(rolls_m.group(1))
