@@ -126,7 +126,7 @@ const SearchScreen = ({ navigation }) => {
         {searchMode === 'regular' ? (
           <TextInput
             style={styles.input}
-            placeholder="e.g. champagne gold bathroom trash can"
+            placeholder="e.g. wireless headphones"
             value={searchTerm}
             onChangeText={setSearchTerm}
             autoCorrect={false}
@@ -138,7 +138,7 @@ const SearchScreen = ({ navigation }) => {
           <>
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Describe what you need in a few lines... e.g. Small bathroom trash can, champagne gold, with lid, modern look"
+              placeholder="Describe what you need in a few lines... e.g. Wireless headphones with noise cancelling, comfortable for travel, under $100"
               value={userInput}
               onChangeText={setUserInput}
               multiline
