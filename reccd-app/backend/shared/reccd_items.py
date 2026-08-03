@@ -232,7 +232,7 @@ _COUNT_PATTERNS: Sequence[Tuple[str, re.Pattern]] = (
         "n_pacs",
         re.compile(r"\b(\d{1,4})\s+(?:[-\w]+\s+){0,3}pacs?\b", re.I),
     ),
-    ("n_ct_word", re.compile(r"\b(\d{1,4})\s*ct\b", re.I)),
+    ("n_ct_word", re.compile(r"\b(\d{1,4})\s*cts?\b", re.I)),
     ("n_pieces", re.compile(r"\b(\d{1,4})\s*[-]?\s*pieces?\b", re.I)),
     ("n_units", re.compile(r"\b(\d{1,4})\s*units?\b", re.I)),
     ("paren_n_pack", re.compile(r"\(\s*(\d{1,3})\s*[-]?\s*pack\s*\)", re.I)),
@@ -303,6 +303,14 @@ _WEIGHT_PATTERNS: Sequence[Tuple[str, re.Pattern, str]] = (
         ),
         "liter",
     ),
+    (
+        "n_gallon",
+        re.compile(
+            r"\b(\d+(?:\.\d+)?)\s*(?:gallons?|gal)\b",
+            re.I,
+        ),
+        "gallon",
+    ),
 )
 
 _LB_TO_OZ = 16.0
@@ -310,6 +318,7 @@ _KG_TO_OZ = 35.274
 _G_TO_OZ = 1.0 / 28.3495
 _L_TO_FL_OZ = 33.814
 _ML_TO_FL_OZ = 1.0 / 29.5735
+_GAL_TO_FL_OZ = 128.0  # US liquid gallon
 
 _MIN_EACH_COUNT = 2
 _MAX_EACH_COUNT = 2000
@@ -421,7 +430,8 @@ _N_X_WEIGHT_PATTERN = re.compile(
     r"\b(\d{1,3})\s*x\s*(\d+(?:\.\d+)?)\s*"
     r"(fl\.?\s*oz|fluid\s+ounces?|oz|ounce|ounces|"
     r"lb|lbs|pound|pounds|g|gram|grams|"
-    r"ml|milliliters?|millilitres?|l|liter|litre|liters|litres)\b",
+    r"ml|milliliters?|millilitres?|l|liter|litre|liters|litres|"
+    r"gallons?|gal)\b",
     re.I,
 )
 
@@ -471,6 +481,8 @@ def _unit_text_to_raw_unit(unit_text: str) -> str:
         return "ounce"
     if u.startswith("lb") or u.startswith("pound"):
         return "pound"
+    if u.startswith("gal"):
+        return "gallon"
     if u.startswith("g") and "gal" not in u:
         return "gram"
     if u.startswith("ml") or u.startswith("millil"):
@@ -597,7 +609,7 @@ def _parse_weight_quantity(match: re.Match, pattern_name: str) -> Optional[float
 
 
 def _weight_to_ounces(qty: float, raw_unit: str) -> float:
-    """Normalize lb/kg/g/L/ml to ounces for comparable $/oz ranking."""
+    """Normalize lb/kg/g/L/ml/gal to ounces for comparable $/oz ranking."""
     u = raw_unit.lower()
     if u == "ounce":
         return round(qty, 4)
@@ -611,6 +623,8 @@ def _weight_to_ounces(qty: float, raw_unit: str) -> float:
         return round(qty * _L_TO_FL_OZ, 4)
     if u == "milliliter":
         return round(qty * _ML_TO_FL_OZ, 4)
+    if u == "gallon":
+        return round(qty * _GAL_TO_FL_OZ, 4)
     return round(qty, 4)
 
 
