@@ -630,7 +630,8 @@ def _weight_to_ounces(qty: float, raw_unit: str) -> float:
 
 _SHEET_PRODUCT_HINT = re.compile(
     r"\b(?:"
-    r"toilet\s+paper|bath\s+tissue|facial\s+tissue|paper\s+towels?|tp\b|"
+    r"toilet\s+paper|bath\s+tissue|facial\s+tissues?|paper\s+towels?|tp\b|"
+    r"kleenex|tissue\s+boxes?|"
     r"sketch\s*books?|sketch\s*pads?|drawing\s+pads?|drawing\s+paper|"
     r"art\s+paper|watercolor\s+paper|mixed\s+media\s+paper|"
     r"copy\s+paper|printer\s+paper|notebook\s+paper|cardstock|"
@@ -673,6 +674,22 @@ def _rolls_in_title(title: str) -> Optional[re.Match]:
     )
 
 
+def _boxes_in_title(title: str) -> Optional[int]:
+    """Count of tissue/paper boxes or cubes, e.g. '4 Family Boxes' / '6 Cubes'."""
+    m = re.search(
+        r"\b(\d{1,3})\s+"
+        r"(?:(?:family|mega|double|triple|cube|flat|soft)\s+)?(?:boxes?|cubes?)\b",
+        title,
+        re.I,
+    )
+    if not m:
+        return None
+    n = int(m.group(1))
+    if _MIN_EACH_COUNT <= n <= _MAX_EACH_COUNT:
+        return n
+    return None
+
+
 def _sheets_per_roll_in_title(title: str) -> Optional[int]:
     for pat in (
         r"\b(\d{2,4})\s*sheets?\s*(?:per\s*roll|/\s*roll|each\s*roll)\b",
@@ -681,6 +698,22 @@ def _sheets_per_roll_in_title(title: str) -> Optional[int]:
         m = re.search(pat, title, re.I)
         if m:
             return int(m.group(1))
+    return None
+
+
+def _sheets_per_box_in_title(title: str) -> Optional[int]:
+    """Tissues/sheets per box, e.g. '124 Facial Tissues per Box'."""
+    for pat in (
+        r"\b(\d{2,4})\s+(?:facial\s+)?tissues?\s+per\s+box\b",
+        r"\b(\d{2,4})\s+sheets?\s+per\s+box\b",
+        r"\b(\d{2,4})\s+(?:facial\s+)?tissues?\s*/\s*box\b",
+        r"\b(\d{2,4})\s+sheets?\s*/\s*box\b",
+    ):
+        m = re.search(pat, title, re.I)
+        if m:
+            n = int(m.group(1))
+            if 20 <= n <= 5000:
+                return n
     return None
 
 
@@ -710,6 +743,8 @@ def _infer_sheet_count_from_title(title: str) -> Tuple[Optional[float], Optional
 
     rolls_m = _rolls_in_title(title)
     spr = _sheets_per_roll_in_title(title)
+    boxes_n = _boxes_in_title(title)
+    spb = _sheets_per_box_in_title(title)
     pack_m = re.search(
         r"\b(\d{1,3})\s+pack\b(?!\s+of\b)",
         title,
@@ -720,11 +755,19 @@ def _infer_sheet_count_from_title(title: str) -> Tuple[Optional[float], Optional
         if _MIN_SHEET_COUNT <= n <= _MAX_SHEET_COUNT:
             return float(n), "rolls_x_sheets_per_roll"
 
+    # e.g. "4 Family Boxes, 124 Facial Tissues per Box"
+    if boxes_n is not None and spb is not None:
+        n = boxes_n * spb
+        if _MIN_SHEET_COUNT <= n <= _MAX_SHEET_COUNT:
+            return float(n), "boxes_x_sheets_per_box"
+
+    # e.g. "24 Pack ... 300 Sheets Per Roll" (no "rolls" in title)
     if pack_m and spr:
         n = int(pack_m.group(1)) * spr
         if _MIN_SHEET_COUNT <= n <= _MAX_SHEET_COUNT:
             return float(n), "pack_x_sheets_per_roll"
 
+    # e.g. "24 Rolls ... 350 Sheets ... 8400 Count" (sheets/roll stated without "per roll")
     if rolls_m and re.search(r"\bsheets?\b", title, re.I):
         for m in re.finditer(r"\b(\d{2,4})\s+sheets?\b", title, re.I):
             per_roll = int(m.group(1))
@@ -741,18 +784,26 @@ def _infer_sheet_count_from_title(title: str) -> Tuple[Optional[float], Optional
                 return float(n), "n_sheet_count"
 
     # Sketch pads / drawing paper / TP without rolls: "100 Sheets"
+    # Also bare tissues per listing when not multipack of boxes.
     if not rolls_m:
         for m in re.finditer(r"\b(\d{2,5})\s+sheets?\b", title, re.I):
             n = int(m.group(1))
             if _MIN_SHEET_COUNT <= n <= _MAX_SHEET_COUNT:
                 return float(n), "n_bare_sheets"
+        if boxes_n is None and spb is not None:
+            if _MIN_SHEET_COUNT <= spb <= _MAX_SHEET_COUNT:
+                return float(spb), "n_tissues_per_box_only"
+        for m in re.finditer(r"\b(\d{2,5})\s+(?:facial\s+)?tissues?\b", title, re.I):
+            n = int(m.group(1))
+            if _MIN_SHEET_COUNT <= n <= _MAX_SHEET_COUNT:
+                return float(n), "n_bare_tissues"
 
     if rolls_m:
         n = int(rolls_m.group(1))
         if _MIN_EACH_COUNT <= n <= _MAX_EACH_COUNT:
             return float(n), "n_rolls_no_sheet_count"
 
-    if pack_m and not spr:
+    if pack_m and not spr and boxes_n is None:
         n = int(pack_m.group(1))
         if _MIN_EACH_COUNT <= n <= _MAX_EACH_COUNT:
             return float(n), "n_rolls_no_sheet_count"
