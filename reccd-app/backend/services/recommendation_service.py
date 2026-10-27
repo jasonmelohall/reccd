@@ -3,7 +3,7 @@
 """
 FastAPI item recommendations: loads scored rows for the mobile/web app.
 
-Query + scoring mirrors reccd-app/backend/pipeline_scripts/9_reccd_items.py
+Query + scoring mirrors reccd-app/backend/pipeline_scripts/5_reccd_output.py
 and items/reccd_items.py (wildcard LIKE on search_term, OR across terms).
 """
 
@@ -34,7 +34,7 @@ def _fetch_items_for_terms(
     user_id: int,
     wildcard_mode: str = "both_ends",
 ) -> pd.DataFrame:
-    """Same WHERE clause as 9_reccd_items.py: OR of search_term LIKE wildcards."""
+    """Same WHERE clause as 5_reccd_output.py: OR of search_term LIKE wildcards."""
     patterns = apply_wildcards(search_terms, wildcard_mode)
     like_conditions = []
     params = {"user_id": user_id}

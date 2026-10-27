@@ -7,8 +7,8 @@ Pipeline service that orchestrates running the full items workflow:
 2. Get listed dates (Keepa API)
 3. Get first available dates (Rainforest API)
 4. Resolve item counts
-5. Run regression to update coefficients
-6. Generate recommendations
+5. Generate recommendations (results)
+6. Run regression to update coefficients
 """
 
 import json
@@ -26,7 +26,7 @@ PIPELINE_DIR = os.path.join(BASE_DIR, "pipeline_scripts")
 SHARED_DIR = os.path.join(BASE_DIR, "shared")
 
 # Scripts that may fail without blocking ingest (search rows already in DB).
-_NON_FATAL_SCRIPTS = frozenset({"32_item_count_resolution.py"})
+_NON_FATAL_SCRIPTS = frozenset({"4_item_count_resolution.py"})
 
 logger.info("Pipeline base directory: %s", PIPELINE_DIR)
 
@@ -38,13 +38,13 @@ class PipelineService:
             "1_search_items_rainforest.py",
             "2_items_get_listed_date_keepa.py",
             "3_get_first_available_rainforest.py",
-            "32_item_count_resolution.py",
-            "8_regression_items.py",
-            "9_reccd_items.py",
+            "4_item_count_resolution.py",
+            "5_reccd_output.py",
+            "6_regression_items.py",
         ]
         self.script_timeouts = {
             "2_items_get_listed_date_keepa.py": 1200,
-            "32_item_count_resolution.py": 600,
+            "4_item_count_resolution.py": 600,
         }
 
     def run_full_pipeline(self, search_term: Union[str, List[str]]):

@@ -95,8 +95,8 @@ try:
         exclude_conditions.append(f"i.title NOT LIKE :{param_name}")
         params[param_name] = term
     
-    # Join all LIKE conditions with OR
-    like_clause = " OR ".join(like_conditions)
+    # Empty search terms match every row (same fallback as empty excludes)
+    like_clause = " OR ".join(like_conditions) if like_conditions else "1=1"
     
     # Join all exclude conditions with AND
     exclude_clause = " AND ".join(exclude_conditions) if exclude_conditions else "1=1"
@@ -133,7 +133,7 @@ try:
     if 'last_update' in df.columns:
         df['last_update'] = (
             pd.to_datetime(df['last_update'], errors='coerce')
-            .dt.strftime('%Y-%m-%d %H:%M')
+            .dt.strftime('%Y-%m-%d')
         )
 
     # === Display ===
@@ -170,7 +170,50 @@ try:
     print(coefficients_df)
     print()
 
-    # === Save Purchased ASINs (unchanged from your version) ===
+    # === Save Purchased ASINs ===
+    # Accept exact ASINs from the full recommendation set, plus sibling/parent
+    # variations that share a parent_asin with anything in that set.
+    def resolve_purchase_row(asin):
+        exact = df[df['asin'] == asin]
+        if not exact.empty:
+            row = exact.iloc[0]
+            return row, row.get('parent_asin') or asin
+
+        as_parent = df[df['parent_asin'] == asin]
+        if not as_parent.empty:
+            row = as_parent.sort_values('reccd', ascending=False).iloc[0]
+            return row, asin
+
+        item = conn.execute(text("""
+            SELECT asin, parent_asin, title, price, rating, ratings_total,
+                   search_rank, search_term, item_count, price_per_item
+            FROM items
+            WHERE asin = :asin
+            LIMIT 1
+        """), {"asin": asin}).mappings().first()
+        if not item:
+            return None, None
+
+        parent = item['parent_asin'] or asin
+        family = df[
+            (df['asin'] == parent)
+            | (df['parent_asin'] == parent)
+            | (df['parent_asin'] == asin)
+        ]
+        if family.empty:
+            return None, None
+
+        row = family.sort_values('reccd', ascending=False).iloc[0].copy()
+        for col in (
+            'title', 'price', 'rating', 'ratings_total',
+            'search_rank', 'search_term', 'item_count', 'price_per_item',
+        ):
+            if col in row.index and item.get(col) is not None:
+                row[col] = item[col]
+        row['asin'] = asin
+        row['parent_asin'] = parent
+        return row, parent
+
     # Skip interactive input when running in non-interactive environment (e.g., Render subprocess)
     purchased_asins = ""
     try:
@@ -204,13 +247,8 @@ try:
             is_negative = raw_asin.startswith('-')
             asin = raw_asin.lstrip('-')
 
-            match = df[df['asin'] == asin]
-            if not match.empty:
-                row = match.iloc[0]
-
-                # Get parent_asin from row, or use asin if no parent
-                parent_asin = row.get('parent_asin') or asin
-                
+            row, parent_asin = resolve_purchase_row(asin)
+            if row is not None:
                 conn.execute(text("""
                     INSERT INTO items_user (
                         user_id, asin, parent_asin, title, price, rating, ratings_total, frequency, search_rank, release_date,

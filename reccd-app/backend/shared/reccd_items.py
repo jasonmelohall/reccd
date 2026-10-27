@@ -76,7 +76,7 @@ def earliest_valid_release_date(*dates: Any) -> Optional[datetime]:
 def apply_valid_release_dates(df):
     """
     For ranking: null out Keepa sentinel dates, then release_date = min of valid columns.
-    Requires pandas (used by 9_reccd_items / recommendation_service).
+    Requires pandas (used by 5_reccd_output / recommendation_service).
     """
     import pandas as pd
 
@@ -208,6 +208,10 @@ _MULTIPLY_COUNT_PATTERNS: Sequence[Tuple[str, re.Pattern]] = (
     ),
 )
 
+# Skip potency (1000 IU, 25 mcg, 50 mg) so bottle count is used instead.
+_NOT_DOSAGE_UNIT = r"(?!\s*(?:iu|i\.u\.?|mcg|mg|µg|milligrams?|micrograms?))"
+_N_PILL_WORDS = r"(?:[-\w]+\s+){0,3}"
+
 _COUNT_PATTERNS: Sequence[Tuple[str, re.Pattern]] = (
     ("pack_of_n", re.compile(r"\bpack\s+of\s+(\d{1,4})\b", re.I)),
     ("n_pack", re.compile(r"\b(\d{1,3})\s*[-]?\s*pack\b", re.I)),
@@ -218,11 +222,30 @@ _COUNT_PATTERNS: Sequence[Tuple[str, re.Pattern]] = (
     ("paren_n_loads", re.compile(r"\(\s*(\d{1,4})\s*[-]?\s*loads?\b", re.I)),
     (
         "n_tabs",
-        re.compile(r"\b(\d{1,4})\s+(?:[-\w]+\s+){0,3}tabs?\b", re.I),
+        re.compile(rf"\b(\d{{1,4}}){_NOT_DOSAGE_UNIT}\s+{_N_PILL_WORDS}tabs?\b", re.I),
     ),
     (
         "n_tablets",
-        re.compile(r"\b(\d{1,4})\s+(?:[-\w]+\s+){0,3}tablets?\b", re.I),
+        re.compile(rf"\b(\d{{1,4}}){_NOT_DOSAGE_UNIT}\s+{_N_PILL_WORDS}tablets?\b", re.I),
+    ),
+    (
+        "n_softgels",
+        re.compile(rf"\b(\d{{1,4}}){_NOT_DOSAGE_UNIT}\s+{_N_PILL_WORDS}softgels?\b", re.I),
+    ),
+    (
+        "n_capsules",
+        re.compile(rf"\b(\d{{1,4}}){_NOT_DOSAGE_UNIT}\s+{_N_PILL_WORDS}capsules?\b", re.I),
+    ),
+    (
+        "n_caplets",
+        re.compile(rf"\b(\d{{1,4}}){_NOT_DOSAGE_UNIT}\s+{_N_PILL_WORDS}caplets?\b", re.I),
+    ),
+    (
+        "n_gummies",
+        re.compile(
+            rf"\b(\d{{1,4}}){_NOT_DOSAGE_UNIT}\s+{_N_PILL_WORDS}(?:gummies|gummy)\b",
+            re.I,
+        ),
     ),
     (
         "n_pods",
@@ -330,6 +353,7 @@ _CONTAINER_VOLUME_PATTERN = re.compile(
     r"thermos|thermo\b|funtainer|food\s+jar|vacuum\s+insulated|insulated\s+(?:food\s+)?jar|"
     r"insulated\s+food|soup\s+thermo|flask|tumbler|carafe|airpot|coffee\s+urn|"
     r"drinkware|water\s+bottle|bottle\s+with|travel\s+mug|mug\b|"
+    r"shaker\s+bottles?|shaker\s+cups?|protein\s+shaker|blender\s*bottles?|"
     r"food\s+storage\s+container|storage\s+container|food\s+container|"
     r"lunch\s+box|lunch\s+container|lunch\s+jar|lunch\s+tin|"
     r"meal\s+prep\s+tin|meal\s+prep\s+container|bento\b|"
@@ -344,7 +368,16 @@ _CONTAINER_VOLUME_PATTERN = re.compile(
     r"(?:dog|pet|cat)\s+water\s+bowl(?:\s+dispenser)?|"
     r"(?:dog|pet|cat)\s+water\s+fountain|"
     r"automatic\s+(?:pet\s+)?waterer|pet\s+fountain|"
-    r"water\s+bowl\s+dispenser"
+    r"water\s+bowl\s+dispenser|"
+    # Empty travel/toiletry bottles: "3oz" is TSA/vessel capacity, not consumable volume.
+    r"travel\s+bottles?|"
+    r"travel\s+size\s+containers?|"
+    r"travel\s+containers?|"
+    r"toiletry\s+bottles?|"
+    r"toiletry\s+containers?|"
+    r"bottles?\s+for\s+toiletries|"
+    r"refillable\s+(?:squeeze\s+)?bottles?|"
+    r"squeeze\s+bottles?\s+with"
     r")\b",
     re.I,
 )
@@ -354,8 +387,18 @@ _CONTAINER_VOLUME_PATTERN = re.compile(
 
 
 def _is_container_volume_title(title: str) -> bool:
-    """True when oz/L likely describes vessel capacity (rank as 1 each, not $/oz)."""
-    return bool(_CONTAINER_VOLUME_PATTERN.search(title))
+    """True when oz/L likely describes vessel capacity (rank as each, not $/oz)."""
+    if _CONTAINER_VOLUME_PATTERN.search(title):
+        return True
+    t = title.lower()
+    if re.search(r"\bbottles?\b", t) and re.search(r"\btoiletr(?:y|ies)\b", t):
+        return True
+    if re.search(r"\bsqueeze\s+bottles?\b", t) and re.search(
+        r"\b(?:refillable|flip\s+cap|tsa)\b",
+        t,
+    ):
+        return True
+    return False
 
 
 def _is_reusable_bag_each_title(title: str) -> bool:
@@ -391,6 +434,26 @@ def _infer_bag_pack_each_from_title(
             continue
         if _MIN_EACH_COUNT <= n <= _MAX_EACH_COUNT:
             return float(n), f"bag_{name}"
+
+    return None, None
+
+
+def _infer_container_pack_each_from_title(
+    title: str,
+) -> Tuple[Optional[float], Optional[str]]:
+    """Pack count for empty containers (e.g. '3oz travel bottles (4 Pack)' -> 4 each)."""
+    if not _is_container_volume_title(title):
+        return None, None
+
+    for name, pat in _COUNT_PATTERNS:
+        m = pat.search(title)
+        if not m:
+            continue
+        n = int(m.group(1))
+        if _is_seed_bulk_each_count(title, n, name):
+            continue
+        if _MIN_EACH_COUNT <= n <= _MAX_EACH_COUNT:
+            return float(n), f"container_{name}"
 
     return None, None
 
@@ -829,6 +892,10 @@ def _is_seed_bulk_each_count(title: str, n: int, pattern_name: str) -> bool:
         "paren_n_loads",
         "n_tabs",
         "n_tablets",
+        "n_softgels",
+        "n_capsules",
+        "n_caplets",
+        "n_gummies",
         "n_pods",
         "n_pacs",
         "n_pieces",
@@ -847,7 +914,7 @@ def infer_quantity_from_title(
     """
     Returns (quantity, count_type, pattern_name).
     Consumable weights normalize to ounces for $/oz.
-    Container capacity (thermos, food jar) is not used as item_count.
+    Container capacity (thermos, food jar, travel bottles, etc.) is not used as item_count.
     Multipack each-count uses count_type='each'.
     Toilet paper / tissue uses count_type='sheet' (or 'roll' if only roll count known).
     Reusable grocery/shopping totes use pack count (each), not L/lb capacity.
@@ -867,6 +934,10 @@ def infer_quantity_from_title(
     bag_qty, bag_pat = _infer_bag_pack_each_from_title(title)
     if bag_qty is not None:
         return bag_qty, "each", bag_pat
+
+    container_qty, container_pat = _infer_container_pack_each_from_title(title)
+    if container_qty is not None:
+        return container_qty, "each", container_pat
 
     weight_oz, weight_pat = _infer_weight_ounces_from_title(title)
     if weight_oz is not None and weight_pat is not None:
@@ -921,7 +992,7 @@ def title_inference_fields(title: Optional[str]) -> Dict[str, Any]:
 def apply_item_count_fields_to_dataframe(df):
     """
     Recompute item_count, count_type, and price_per_item from title + price
-    for in-memory ranking (e.g. 9_reccd_items). Requires pandas.
+    for in-memory ranking (e.g. 5_reccd_output). Requires pandas.
     """
     import pandas as pd
 
@@ -1271,7 +1342,7 @@ def save_rainforest_search_batch(conn, consolidated_items, *, associate_tag: str
     conn.commit()
 
 
-# ===== Item ranking (shared by 9_reccd_items, API recommendation_service) =====
+# ===== Item ranking (shared by 5_reccd_output, API recommendation_service) =====
 
 ITEM_COEFFICIENT_KEYS = (
     "price_percentile",

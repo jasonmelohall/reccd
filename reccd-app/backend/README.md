@@ -41,8 +41,9 @@ When `/api/search` is called, the backend:
 2. Runs `1_search_items_rainforest.py` - Amazon search
 3. Runs `2_items_get_listed_date_keepa.py` - Product dates
 4. Runs `3_get_first_available_rainforest.py` - Additional data
-5. Runs `8_regression_items.py` - Update ML coefficients
-6. Runs `9_reccd_items.py` - Calculate recommendations
+5. Runs `4_item_count_resolution.py` - Item counts
+6. Runs `5_reccd_output.py` - Calculate recommendations
+7. Runs `6_regression_items.py` - Update ML coefficients
 
 All your existing Python scripts still work standalone!
 

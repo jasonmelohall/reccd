@@ -3,7 +3,7 @@
 
 """
 Simple recommendation service that just queries pre-computed results.
-Run your existing Python scripts (1_search, 9_reccd) to populate data,
+Run your existing Python scripts (1_search, 5_reccd_output) to populate data,
 then this API just returns what's already in the database.
 """
 

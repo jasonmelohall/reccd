@@ -52,12 +52,13 @@ Output ONLY a Python list:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-6-luna",
             messages=[
                 {"role": "system", "content": "You output only a Python list of strings. No other text."},
                 {"role": "user", "content": prompt},
             ],
-            max_tokens=500,
+            max_completion_tokens=500,
+            reasoning_effort="none",
         )
         raw = (response.choices[0].message.content or "").strip()
         if not raw:
